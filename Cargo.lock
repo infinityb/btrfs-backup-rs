@@ -1,0 +1,12 @@
+[root]
+name = "backupserver"
+version = "0.0.1"
+dependencies = [
+ "reliable-rw 0.1.0 (git+https://github.com/infinityb/reliable-rw-rust#9cf5ab3f519a9245aa4d1b5c2568c5a2434bee49)",
+]
+
+[[package]]
+name = "reliable-rw"
+version = "0.1.0"
+source = "git+https://github.com/infinityb/reliable-rw-rust#9cf5ab3f519a9245aa4d1b5c2568c5a2434bee49"
+
