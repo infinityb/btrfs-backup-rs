@@ -11,3 +11,7 @@ path = "src/main.rs"
 
 [dependencies.reliable-rw]
 git = "https://github.com/infinityb/reliable-rw-rust"
+
+
+[dependencies.uuid]
+git = "https://github.com/rust-lang/uuid"

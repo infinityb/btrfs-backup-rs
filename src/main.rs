@@ -1,5 +1,8 @@
 extern crate reliable_rw;
+extern crate uuid;
+
 extern crate debug;
+
 
 use std::os::{args_as_bytes, set_exit_status};
 use std::io::fs::stat;
@@ -7,6 +10,8 @@ use std::io::{FileStat, TypeDirectory};
 use repository::{BackupNode, Repository};
 
 mod repository;
+mod btrfs;
+
 
 fn print_usage(program: &[u8]) {
     let mut stderr = std::io::stderr();

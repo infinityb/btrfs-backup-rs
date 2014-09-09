@@ -1,14 +1,29 @@
 use std::gc::{GC, Gc};
 
 
+pub enum BackupNodeKind {
+    FullBackup,
+    IncrementalBackup
+}
+
+
 pub struct BackupNode {
+    kind: BackupNodeKind,
     name: String
 }
 
 
 impl BackupNode {
-    pub fn new(name: &str) -> BackupNode {
+    pub fn new_full(name: &str) -> BackupNode {
         BackupNode {
+            kind: FullBackup,
+            name: String::from_str(name)
+        }
+    }
+
+    pub fn new_incr(name: &str) -> BackupNode {
+        BackupNode {
+            kind: IncrementalBackup,
             name: String::from_str(name)
         }
     }
