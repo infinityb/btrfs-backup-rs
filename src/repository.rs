@@ -1,5 +1,5 @@
 use std::gc::{GC, Gc};
-use std::io::{File, BufReader, BufferedReader, IoResult, IoError};
+use std::io::{File, BufferedReader, IoResult};
 use btrfs::{
     get_first_command,
     BtrfsCommand,
@@ -9,12 +9,14 @@ use btrfs::{
 use std::io::fs::readdir;
 
 
+#[deriving(Decodable, Encodable)]
 pub enum BackupNodeKind {
     FullBackup,
     IncrementalBackup
 }
 
 
+#[deriving(Decodable, Encodable)]
 pub struct BackupNode {
     kind: BackupNodeKind,
     path: Path,
@@ -70,7 +72,7 @@ impl Repository {
         let paths = try!(readdir(&self.root));
         for path in paths.iter() {
             match File::open(path) {
-                Ok(mut file) => {
+                Ok(file) => {
                     let mut file = BufferedReader::new(file);
                     let command = match get_first_command(&mut file) {
                         Ok(command) => command,

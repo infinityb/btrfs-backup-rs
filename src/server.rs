@@ -1,15 +1,17 @@
-extern crate reliable_rw;
+extern crate serialize;
 extern crate uuid;
-
 extern crate debug;
 
+extern crate reliable_rw;
 
 use std::os::{args_as_bytes, set_exit_status};
 use std::io::fs::stat;
-use std::io::{FileStat, TypeDirectory};
-use repository::{BackupNode, Repository};
+use std::io::{FileStat, TypeDirectory, stdin, stdout};
+use repository::{Repository};
+use protocol::Protocol;
 
 mod repository;
+mod protocol;
 mod btrfs;
 
 
@@ -44,6 +46,23 @@ fn main() {
         Err(e) => fail!("stat error: {}", e)
     }
 
-    let mut foo = Repository::load_from(&path);
+    let mut foo = match Repository::load_from(&path) {
+        Ok(repo) => repo,
+        Err(err) => fail!("Error while reading repository: {}", err)
+    };
+
+    let mut stdin = stdin();
+    let mut stdout = stdout();
+    
+
+    let mut proto = Protocol::new(&mut stdin, &mut stdout);
+
+    match proto.read_magic() {
+        Ok(true) => (),
+        Ok(false) => fail!("Invalid magic"),
+        Err(err) => fail!("Error reading: {}", err)
+    };
+    proto.write_repository(&foo);
+
     // foo.add_edge(BackupNode::new("foo"), BackupNode::new("bar"));
 }

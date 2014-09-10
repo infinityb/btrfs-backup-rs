@@ -85,6 +85,7 @@ pub struct BtrfsSubvol {
     pub ctransid: u64,
 }
 
+
 impl BtrfsSubvol {
     pub fn parse(reader: &mut Reader) -> Result<BtrfsSubvol, BtrfsParseError> {
         let name = match tlv_read(reader) {
@@ -235,20 +236,18 @@ fn tlv_read(reader: &mut Reader) -> IoResult<BtrfsTlvType> {
 
 
 struct BtrfsCommandIter<'a> {
-    reader: &'a mut Reader+'a,
-    parsed_header: bool
-}
+    reader: &'a mut Reader+'a
+    }
 
 
 impl<'a> BtrfsCommandIter<'a> {
     pub fn new<'a>(reader: &'a mut Reader) -> Result<BtrfsCommandIter<'a>, BtrfsParseError> {
         let header = try!(BtrfsHeader::parse(reader));
-        if (header.version != 1) {
+        if header.version != 1 {
             return Err(InvalidVersion);
         }
         Ok(BtrfsCommandIter {
-            reader: reader,
-            parsed_header: false
+            reader: reader
         })
     }
 }
@@ -257,7 +256,7 @@ impl<'a> Iterator<BtrfsCommand> for BtrfsCommandIter<'a> {
     fn next(&mut self) -> Option<BtrfsCommand> {
         match BtrfsCommand::parse(self.reader) {
             Ok(command) => Some(command),
-            Err(err) => None
+            Err(_) => None
         }
     }
 }
