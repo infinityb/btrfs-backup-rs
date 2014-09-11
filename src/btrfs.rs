@@ -79,6 +79,7 @@ impl BtrfsHeader {
 }
 
 
+#[deriving(Clone)]
 pub struct BtrfsSubvol {
     pub name: Vec<u8>,
     pub uuid: Uuid,
@@ -133,6 +134,7 @@ impl BtrfsSubvol {
 }
 
 
+#[deriving(Clone)]
 pub struct BtrfsSnapshot {
     pub name: Vec<u8>,
     pub uuid: Uuid,

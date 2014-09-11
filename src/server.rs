@@ -1,8 +1,15 @@
+#![feature(phase)]
 extern crate serialize;
-extern crate uuid;
 extern crate debug;
 
+#[phase(plugin)]
+extern crate phf_mac;
+
+extern crate uuid;
+extern crate phf;
+
 extern crate reliable_rw;
+
 
 use std::os::{args_as_bytes, set_exit_status};
 use std::io::fs::stat;
@@ -53,16 +60,6 @@ fn main() {
 
     let mut stdin = stdin();
     let mut stdout = stdout();
-    
-
     let mut proto = Protocol::new(&mut stdin, &mut stdout);
-
-    match proto.read_magic() {
-        Ok(true) => (),
-        Ok(false) => fail!("Invalid magic"),
-        Err(err) => fail!("Error reading: {}", err)
-    };
-    proto.write_repository(&foo);
-
-    // foo.add_edge(BackupNode::new("foo"), BackupNode::new("bar"));
+    proto.run(&foo);
 }

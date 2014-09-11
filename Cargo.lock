@@ -2,9 +2,21 @@
 name = "backupserver"
 version = "0.0.1"
 dependencies = [
+ "phf 0.0.0 (git+https://github.com/sfackler/rust-phf#6c3683f28fc7b395f0925044aecbd4b30fb367f6)",
+ "phf_mac 0.0.0 (git+https://github.com/sfackler/rust-phf#6c3683f28fc7b395f0925044aecbd4b30fb367f6)",
  "reliable-rw 0.1.0 (git+https://github.com/infinityb/reliable-rw-rust#9cf5ab3f519a9245aa4d1b5c2568c5a2434bee49)",
  "uuid 0.0.1 (git+https://github.com/rust-lang/uuid#83939c6b13803f0aeed7efb79dba087d03d96627)",
 ]
+
+[[package]]
+name = "phf"
+version = "0.0.0"
+source = "git+https://github.com/sfackler/rust-phf#6c3683f28fc7b395f0925044aecbd4b30fb367f6"
+
+[[package]]
+name = "phf_mac"
+version = "0.0.0"
+source = "git+https://github.com/sfackler/rust-phf#6c3683f28fc7b395f0925044aecbd4b30fb367f6"
 
 [[package]]
 name = "reliable-rw"

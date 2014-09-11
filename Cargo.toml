@@ -6,7 +6,7 @@ authors = ["Stacey Ell <stacey.ell@gmail.com>"]
 
 [[bin]]
 name = "backupserver"
-path = "src/main.rs"
+path = "src/server.rs"
 
 
 [dependencies.reliable-rw]
@@ -15,3 +15,10 @@ git = "https://github.com/infinityb/reliable-rw-rust"
 
 [dependencies.uuid]
 git = "https://github.com/rust-lang/uuid"
+
+
+[dependencies.phf]
+git = "https://github.com/sfackler/rust-phf"
+
+[dependencies.phf_mac]
+git = "https://github.com/sfackler/rust-phf"

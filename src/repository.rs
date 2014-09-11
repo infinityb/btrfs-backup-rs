@@ -1,24 +1,30 @@
-use std::gc::{GC, Gc};
 use std::io::{File, BufferedReader, IoResult};
+use std::slice::Items;
+use uuid::Uuid;
+
+
 use btrfs::{
     get_first_command,
     BtrfsCommand,
     BtrfsSubvolCommand,
-    BtrfsSnapshotCommand
+    BtrfsSubvol,
+    BtrfsSnapshotCommand,
+    BtrfsSnapshot
 };
 use std::io::fs::readdir;
 
 
-#[deriving(Decodable, Encodable)]
+// #[deriving(Decodable, Encodable)]
 pub enum BackupNodeKind {
-    FullBackup,
-    IncrementalBackup
+    FullBackup(BtrfsSubvol),
+    IncrementalBackup(BtrfsSnapshot)
 }
 
 
-#[deriving(Decodable, Encodable)]
+// #[deriving(Decodable, Encodable)]
 pub struct BackupNode {
     kind: BackupNodeKind,
+    uuid: Uuid,
     path: Path,
     name: Vec<u8>
 }
@@ -29,27 +35,32 @@ impl BackupNode {
         match command {
             &BtrfsSubvolCommand(ref subvol) => {
                 BackupNode {
-                    kind: FullBackup,
+                    kind: FullBackup(subvol.clone()),
+                    uuid: subvol.uuid.clone(),
                     path: path.clone(),
-                    name: subvol.name.clone()
+                    name: subvol.name.clone(),
                 }
             },
             &BtrfsSnapshotCommand(ref snap) => {
                 BackupNode {
-                    kind: IncrementalBackup,
+                    kind: IncrementalBackup(snap.clone()),
+                    uuid: snap.uuid.clone(),
                     path: path.clone(),
                     name: snap.name.clone()
                 }
             }
         }
     }
+
+    pub fn get_uuid<'a>(&'a self) -> &'a Uuid {
+        &self.uuid
+    }
 }
 
 
 pub struct Repository {
     root: Path,
-    edges: Vec<(Gc<BackupNode>, Gc<BackupNode>)>,
-    nodes: Vec<Gc<BackupNode>>
+    nodes: Vec<BackupNode>
 }
 
 
@@ -57,7 +68,6 @@ impl Repository {
     pub fn new(path: &Path) -> Repository {
         Repository {
             root: path.clone(),
-            edges: Vec::new(),
             nodes: Vec::new()
         }
     }
@@ -79,7 +89,7 @@ impl Repository {
                         Err(_) => continue  // TODO: skip, I guess~  Maybe warn?
                     };
                     let node = BackupNode::from_btrfs_command(path, &command);
-                    self.nodes.push(box(GC) node);
+                    self.nodes.push(node);
                 },
                 Err(_) => {
                     // TODO: skip, I guess~  Maybe warn?
@@ -90,7 +100,11 @@ impl Repository {
         Ok(())
     }
 
-    pub fn add_edge(&mut self, from: BackupNode, to: BackupNode) {
-        self.edges.push((box(GC) from, box(GC) to));
+    pub fn iter_nodes<'a>(&'a self) -> Items<'a, BackupNode> {
+        self.nodes.iter()
+    }
+
+    pub fn get_root(&self) -> &Path {
+        &self.root
     }
 }
