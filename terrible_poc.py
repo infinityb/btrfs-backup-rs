@@ -1,10 +1,16 @@
 import sys
+import os
 import re
 import subprocess
 import struct
+import datetime
 from uuid import UUID
 from collections import namedtuple
 from operator import attrgetter
+
+"""Ideally this whole thing is written in native rust,
+including the part where the application calls ioctls to
+get the serialised btrfs stream out"""
 
 
 class BtrfsListRecord(namedtuple('BtrfsListRecord', [
@@ -24,6 +30,15 @@ class BtrfsListRecord(namedtuple('BtrfsListRecord', [
             next(lines)  # header
             next(lines)  # sep
             return cls.from_lines((x.strip() for x in lines))
+
+        def find_latest(self, uuid_list):
+            candidates = list()
+            for record in self:
+                if UUID(record.uuid) in uuid_list:
+                    candidates.append((int(record.gen), record))
+            if not candidates:
+                return None
+            return sorted(candidates, reverse=True)[0][1]
 
         def find_snapshots_of_path(self, path):
             for record in self:
@@ -81,29 +96,7 @@ class ProtocolClient(object):
         self.writer.write(struct.pack('>Q', 0))
 
 
-def main(argv):
-    (subv_root, subv_name) = sys.argv[1:3]
-    recs = BtrfsListRecord.List.load_from(subv_root)
-    parent_candidates = recs.find_snapshots_of_path(subv_name)
-
-    popen = subprocess.Popen(
-        ['./target/backupserver', '/tmp/btsx'],
-        stdout=subprocess.PIPE, stdin=subprocess.PIPE)
-
-    client = ProtocolClient(popen.stdout, popen.stdin)
-    client._handshake()
-
-    print("listing nodes: ")
-    remote_nodes = client.list_nodes()
-    for node in remote_nodes:
-        print("    node: {}".format(node))
-
-    print("finding nodes: ")
-    remote_candidates = client.find_nodes(
-        map(attrgetter('uuid'), parent_candidates))
-    for node in remote_candidates:
-        print("    node: {}".format(node))
-
+def upload_bogus_archives(client):
     writer = client.upload_archive()
     writer.write(
         b"reliable-encap\x00\x00\x00\x00\xe3\xb0\xc4B\x98\xfc\x1c\x14"
@@ -119,6 +112,59 @@ def main(argv):
         b"\xf8\xc6\x10V\xee\x1e\xb1$;\xe3\x80[\xf9\xa9\xdf\x98\xf9/v6\xb0"
         b"\\/r\xcc\x11\xa6\xfc\xd0'\x1e\xce\xf8\xc6\x10V\xee\x1e\xb1$;\xe3"
         b"\x80[\xf9\xa9\xdf\x98\xf9/v6\xb0\\")
+
+
+def main(argv):
+    (subv_root, subv_name) = sys.argv[1:3]
+    recs = BtrfsListRecord.List.load_from(subv_root)
+    parent_candidates = recs.find_snapshots_of_path(subv_name)
+    popen = subprocess.Popen([
+        'ssh', '-i', '/root/backups.id_rsa',
+        'sell@vita.yasashiisyndicate.org',
+        'backupserver', '/nowhere'],
+        stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+
+    client = ProtocolClient(popen.stdout, popen.stdin)
+    client._handshake()
+
+    print("listing nodes: ")
+    remote_nodes = client.list_nodes()
+    for node in remote_nodes:
+        print("    node: {}".format(node))
+
+    remote_candidates = client.find_nodes(
+        map(attrgetter('uuid'), parent_candidates))
+    print("finding nodes in {!r}:".format(parent_candidates))
+    for node in remote_candidates:
+        print("    node: {}".format(node))
+
+    good_parent = recs.find_latest(remote_candidates)
+    print("Found a good parent: {!r}".format(good_parent))
+
+    archive = client.upload_archive()
+    snapshot_name = '{}_{}' \
+        .format(subv_name, datetime.datetime.now()) \
+        .replace(' ', 'T')
+    assert subprocess.Popen([
+        'btrfs', 'subvolume', 'snapshot', '-r',
+        os.path.join(subv_root, subv_name),
+        os.path.join(subv_root, snapshot_name)
+    ]).wait() == 0
+    assert subprocess.Popen(['sync']).wait() == 0
+    sp_btrfs = subprocess.Popen([
+        '/root/bin/reliable-encap', '--', 'btrfs', 'send', '-p',
+        os.path.join(subv_root, good_parent.path),
+        os.path.join(subv_root, snapshot_name),
+    ], stdout=subprocess.PIPE)
+    while True:
+        buf = sp_btrfs.stdout.read(2 ** 16)
+        if not buf:
+            break
+        archive.write(buf)
+    sp_btrfs.wait()
+
+    client.exit()
+    popen.wait()
 
 if __name__ == '__main__':
     main(sys.argv)
