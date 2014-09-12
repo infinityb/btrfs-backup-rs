@@ -1,4 +1,4 @@
-use std::io::{File, BufferedReader, IoResult};
+use std::io::{File, BufferedReader, IoResult, stderr};
 use std::slice::Items;
 use uuid::Uuid;
 
@@ -96,7 +96,8 @@ impl Repository {
                 }
             }
         }
-        println!("loaded repository with {} nodes", self.nodes.len());
+        let mut err = stderr();
+        err.write(format!("loaded repository with {} nodes\n", self.nodes.len()).as_bytes());
         Ok(())
     }
 

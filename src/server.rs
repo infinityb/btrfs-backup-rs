@@ -15,7 +15,7 @@ use std::os::{args_as_bytes, set_exit_status};
 use std::io::fs::stat;
 use std::io::{FileStat, TypeDirectory, stdin, stdout};
 use repository::{Repository};
-use protocol::Protocol;
+use protocol::ProtocolServer as Protocol;
 
 mod repository;
 mod protocol;
@@ -53,7 +53,7 @@ fn main() {
         Err(e) => fail!("stat error: {}", e)
     }
 
-    let mut foo = match Repository::load_from(&path) {
+    let foo = match Repository::load_from(&path) {
         Ok(repo) => repo,
         Err(err) => fail!("Error while reading repository: {}", err)
     };

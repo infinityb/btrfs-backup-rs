@@ -1,5 +1,5 @@
-use std::io::{File, BufReader, IoResult, IoError, OtherIoError};
-use std::io::fs::rename;
+use std::io::{File, BufReader, IoResult, IoError, OtherIoError, stderr};
+use std::io::fs::{rename, unlink};
 use std::collections::HashSet;
 
 use uuid::Uuid;
@@ -9,10 +9,10 @@ use reliable_rw::{copy_out, ProtocolError, IntegrityError, ReadError, WriteError
 use repository::Repository;
 
 
-static magic_number: &'static [u8] = b"\xa8\x5b\x4b\x2b\x1b\x75\x4c\x0a";
+static MAGIC_REQUEST: &'static [u8] = b"\xa8\x5b\x4b\x2b\x1b\x75\x4c\x0a";
+static MAGIC_RESPONSE: &'static [u8] = b"\xfb\x70\x4c\x63\x41\x1d\x9c\x0a";
 
-
-pub struct Protocol<'a> {
+pub struct ProtocolServer<'a> {
     reader: &'a mut Reader+'a,
     writer: &'a mut Writer+'a
 }
@@ -25,6 +25,22 @@ pub enum ProtocolCommand {
 }
 
 
+impl ProtocolCommand {
+    pub fn to_op_code(&self) -> u64 {
+        match self {
+            &FindNodes => 1_u64,
+            &ListNodes => 2_u64,
+            &UploadArchive => 3_u64,
+        }
+    }
+}
+
+// static ROP_CODES: PhfMap<ProtocolCommand, u64> = phf_map! {
+//     &FindNodes => 1_u64,
+//     &ListNodes => 2_u64,
+//     &UploadArchive => 3_u64,
+// };
+
 static OP_CODES: PhfMap<u64, ProtocolCommand> = phf_map! {
     1_u64 => FindNodes,
     2_u64 => ListNodes,
@@ -32,17 +48,17 @@ static OP_CODES: PhfMap<u64, ProtocolCommand> = phf_map! {
 };
 
 
-impl<'a> Protocol<'a> {
-    pub fn new<'a>(reader: &'a mut Reader, writer: &'a mut Writer) -> Protocol<'a> {
-        Protocol {
+impl<'a> ProtocolServer<'a> {
+    pub fn new<'a>(reader: &'a mut Reader, writer: &'a mut Writer) -> ProtocolServer<'a> {
+        ProtocolServer {
             reader: reader,
             writer: writer
         }
     }
 
     pub fn read_magic(&mut self) -> IoResult<bool> {
-        let magic = try!(self.reader.read_exact(magic_number.len()));
-        Ok(magic.as_slice() == magic_number)
+        let magic = try!(self.reader.read_exact(MAGIC_REQUEST.len()));
+        Ok(magic.as_slice() == MAGIC_REQUEST)
     }
 
     pub fn read_parent_list(&mut self) -> IoResult<Vec<Uuid>> {
@@ -63,10 +79,6 @@ impl<'a> Protocol<'a> {
         Ok(out)
     }
 
-    pub fn write_repository(&mut self, _repo: &Repository) -> IoResult<()> {
-        self.writer.write(Vec::new().as_slice())
-    }
-
     fn dispatch_find_nodes(&mut self, repo: &Repository) -> IoResult<()> {
         let want_parents: HashSet<Uuid> = try!(self.read_parent_list())
                 .move_iter().collect();
@@ -75,33 +87,49 @@ impl<'a> Protocol<'a> {
                 .map(|node| node.get_uuid().clone()).collect();
 
         for cand in want_parents.intersection(&have_parents) {
-            println!("candidate: {}", cand);
-            // write out
+            try!(self.writer.write_u8(1));
+            try!(self.writer.write(cand.as_bytes()));
         }
+        try!(self.writer.write_u8(0));
+        try!(self.writer.flush());
         Ok(())
     }
 
     fn dispatch_list_nodes(&mut self, repo: &Repository) -> IoResult<()> {
-        for cand in try!(self.read_parent_list()).iter() {
-            println!("candidate: {}", cand);
-            // write out
+        let mut err = stderr();
+
+        let mut node_count: uint = 0;
+        try!(err.write(format!("listing nodes...\n").as_bytes()));
+
+        for node in repo.iter_nodes() {
+            self.writer.write_u8(1);
+            self.writer.write(node.get_uuid().as_bytes());
+            node_count += 1;
         }
+        try!(err.write(format!("    sent {} nodes\n", node_count).as_bytes()));
+        try!(self.writer.write_u8(0));
+        try!(self.writer.flush());
         Ok(())
     }
 
     fn dispatch_upload_archive(&mut self, repo: &Repository) -> IoResult<()> {
-        let object_id = Uuid::new_v4().to_hyphenated_string();
+        let object_id = Uuid::new_v4();
+        let object_id_str = object_id.to_hyphenated_string();
+        let mut err = stderr();
+        err.write(format!("SERVER: obj:{} create\n", object_id_str).as_bytes());
 
         let mut tmp_path = repo.get_root().clone();
-        tmp_path.push(format!("{}.tmp", object_id.as_slice()).as_slice());
+        tmp_path.push(format!("{}.tmp", object_id_str).as_slice());
 
         let mut final_path = repo.get_root().clone();
-        final_path.push(object_id.as_slice());
+        final_path.push(object_id_str.as_slice());
 
         let mut file = try!(File::create(&tmp_path));
 
-        try!(match copy_out(self.reader, &mut file) {
-            Ok(()) => Ok(()),
+        let result = match copy_out(self.reader, &mut file) {
+            Ok(()) => {
+                Ok(())
+            },
             // TODO: fix hacks.
             Err(IntegrityError) => Err(IoError {
                 kind: OtherIoError,
@@ -115,9 +143,26 @@ impl<'a> Protocol<'a> {
             }),
             Err(ReadError(io_error)) => Err(io_error),
             Err(WriteError(io_error)) => Err(io_error),
-        });
-        try!(rename(&tmp_path, &final_path));
-        Ok(())
+        };
+        match result {
+            Ok(_) => {
+                let buf = object_id.as_bytes();
+                if buf.len() != 16 {
+                    fail!("fail");
+                }
+                try!(rename(&tmp_path, &final_path));
+                try!(self.writer.write(b"\x01"));
+                try!(self.writer.write(buf));
+                try!(self.writer.flush());
+                Ok(())
+            }
+            Err(err) => {
+                try!(self.writer.write(b"\x00"));
+                try!(unlink(&tmp_path));
+                try!(self.writer.flush());
+                Err(err)
+            }
+        }
     }
 
     fn dispatch(&mut self, repo: &Repository, command: &ProtocolCommand) -> IoResult<()> {
@@ -129,14 +174,21 @@ impl<'a> Protocol<'a> {
     }
 
     pub fn run(&mut self, repo: &Repository) -> IoResult<()> {
+        let mut stderr_writer = stderr();
         let is_valid = try!(self.read_magic());
         if !is_valid {
             // ProtocolError("Invalid magic")
             fail!("Invalid magic");
         }
+        try!(self.writer.write(MAGIC_RESPONSE));
 
         loop {
             let op_code = try!(self.reader.read_be_u64());
+            if op_code == 0 {
+                break;
+            }
+            try!(stderr_writer.write(format!("handling OP{}\n", op_code).as_bytes()));
+            try!(stderr_writer.flush());
             match OP_CODES.find(&op_code) {
                 Some(val) => try!(self.dispatch(repo, val)),
                 None => {
@@ -145,5 +197,6 @@ impl<'a> Protocol<'a> {
                 }
             }
         }
+        Ok(())
     }
 }
