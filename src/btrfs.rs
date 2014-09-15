@@ -10,16 +10,52 @@ static BTRFS_SAMPLE_SUBVOL: &'static [u8] = b"btrfs-stream\x00\x01\x00\x00\x00:\
 #[cfg(test)]
 static BTRFS_SAMPLE_SNAPSHOT: &'static [u8] = b"btrfs-stream\x00\x01\x00\x00\x00Z\x00\x00\x00\x02\x00\xd78\x04+\x0f\x00\x16\x00root_jessie_2014-08-25\x01\x00\x10\x00\x19\xf1vb=y\x94O\xb4\x0fm\xcc\x1dy@\xd1\x02\x00\x08\x00?)\x00\x00\x00\x00\x00\x00\x14\x00\x10\x00\x8a\xcf\\z3\x0ciD\xa7\x13\xa8\xfb\xa5v\x15x\x15\x00\x08\x00\xd2\x18\x00\x00\x00\x00\x00\x004\x00\x00\x00\x14\x00\r\xe5\xc0%\x0f";
 
+#[allow(non_camel_case_types)]
+#[deriving(FromPrimitive, PartialEq)]
+enum BtrfsCommandType2 {
+    BTRFS_SEND_C_UNSPEC,
+    BTRFS_SEND_C_SUBVOL,
+    BTRFS_SEND_C_SNAPSHOT,
+    BTRFS_SEND_C_MKFILE,
+    BTRFS_SEND_C_MKDIR,
+    BTRFS_SEND_C_MKNOD,
+    BTRFS_SEND_C_MKFIFO,
+    BTRFS_SEND_C_MKSOCK,
+    BTRFS_SEND_C_SYMLINK,
+    BTRFS_SEND_C_RENAME,
+    BTRFS_SEND_C_LINK,
+    BTRFS_SEND_C_UNLINK,
+    BTRFS_SEND_C_RMDIR,
+    BTRFS_SEND_C_SET_XATTR,
+    BTRFS_SEND_C_REMOVE_XATTR,
+    BTRFS_SEND_C_WRITE,
+    BTRFS_SEND_C_CLONE,
+    BTRFS_SEND_C_TRUNCATE,
+    BTRFS_SEND_C_CHMOD,
+    BTRFS_SEND_C_CHOWN,
+    BTRFS_SEND_C_UTIMES,
+    BTRFS_SEND_C_END,
+    BTRFS_SEND_C_UPDATE_EXTENT
+}
 
-pub enum BtrfsCommand {
+pub enum BtrfsCommandType {
     BtrfsSubvolCommand(BtrfsSubvol),
     BtrfsSnapshotCommand(BtrfsSnapshot),
+    BtrfsUnknownCommand(u16)
+}
+
+pub struct BtrfsCommand {
+    pub len: u32,
+    pub kind2: BtrfsCommandType2,
+    pub kind: BtrfsCommandType,
+    pub crc32: u32,
+    pub data: Vec<u8>
 }
 
 
 impl BtrfsCommand {
     pub fn parse(reader: &mut Reader) -> Result<BtrfsCommand, BtrfsParseError> {
-        let _len = match reader.read_le_u32() {
+        let len = match reader.read_le_u32() {
             Ok(length) => length,
             Err(err) => return Err(ReadError(err))
         };
@@ -27,22 +63,28 @@ impl BtrfsCommand {
             Ok(command_num) => command_num,
             Err(err) => return Err(ReadError(err))
         };
-        let _crc32 = match reader.read_le_u32() {
+        let crc32 = match reader.read_le_u32() {
             Ok(length) => length,
             Err(err) => return Err(ReadError(err))
         };
-
-        match command {
-            1 => match BtrfsSubvol::parse(reader) {
-                Ok(subv) => Ok(BtrfsSubvolCommand(subv)),
-                Err(err) => Err(err)
-            },
-            2 => match BtrfsSnapshot::parse(reader) {
-                Ok(subv) => Ok(BtrfsSnapshotCommand(subv)),
-                Err(err) => Err(err)
-            },
-            cmd => Err(ProtocolError(format!("Unknown command: {}", cmd)))
-        }
+        let buf = match reader.read_exact(len as uint) {
+            Ok(buf) => buf,
+            Err(err) => return Err(ReadError(err))
+        };
+        let buf_copy = buf.clone();
+        let mut command_part = BufReader::new(buf_copy.as_slice());
+        let kind = match command {
+            1 => BtrfsSubvolCommand(try!(BtrfsSubvol::parse(&mut command_part))),
+            2 => BtrfsSnapshotCommand(try!(BtrfsSnapshot::parse(&mut command_part))),
+            other => BtrfsUnknownCommand(other)
+        };
+        Ok(BtrfsCommand {
+            len: len,
+            kind2: FromPrimitive::from_u16(command).unwrap(),
+            kind: kind,
+            crc32: crc32,
+            data: buf
+        })
     }
 }
 
@@ -57,7 +99,7 @@ pub enum BtrfsParseError {
 
 #[deriving(Show)]
 pub struct BtrfsHeader {
-    version: u32,
+    pub version: u32,
 }
 
 
@@ -237,9 +279,10 @@ fn tlv_read(reader: &mut Reader) -> IoResult<BtrfsTlvType> {
 }
 
 
-struct BtrfsCommandIter<'a> {
-    reader: &'a mut Reader+'a
-    }
+pub struct BtrfsCommandIter<'a> {
+    reader: &'a mut Reader+'a,
+    is_finished: bool
+}
 
 
 impl<'a> BtrfsCommandIter<'a> {
@@ -249,16 +292,25 @@ impl<'a> BtrfsCommandIter<'a> {
             return Err(InvalidVersion);
         }
         Ok(BtrfsCommandIter {
-            reader: reader
+            reader: reader,
+            is_finished: false
         })
     }
 }
 
 impl<'a> Iterator<BtrfsCommand> for BtrfsCommandIter<'a> {
     fn next(&mut self) -> Option<BtrfsCommand> {
+        if self.is_finished {
+            return None
+        }
         match BtrfsCommand::parse(self.reader) {
-            Ok(command) => Some(command),
-            Err(_) => None
+            Ok(command) => {
+                if command.kind2 == BTRFS_SEND_C_END {
+                    self.is_finished = true;
+                }
+                Some(command)
+            }
+            Err(err) => fail!("err: {}", err)
         }
     }
 }

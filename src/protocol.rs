@@ -3,7 +3,6 @@ use std::io::fs::{rename, unlink};
 use std::collections::HashSet;
 
 use uuid::Uuid;
-use phf::PhfMap;
 use reliable_rw::{copy_out, ProtocolError, IntegrityError, ReadError, WriteError};
 
 use repository::Repository;
@@ -17,35 +16,14 @@ pub struct ProtocolServer<'a> {
     writer: &'a mut Writer+'a
 }
 
+
+#[deriving(FromPrimitive, PartialEq)]
 pub enum ProtocolCommand {
-    /// 
-    FindNodes,
-    ListNodes,
-    UploadArchive,
+    Quit = 0,
+    FindNodes = 1,
+    ListNodes = 2,
+    UploadArchive = 3,
 }
-
-
-impl ProtocolCommand {
-    pub fn to_op_code(&self) -> u64 {
-        match self {
-            &FindNodes => 1_u64,
-            &ListNodes => 2_u64,
-            &UploadArchive => 3_u64,
-        }
-    }
-}
-
-// static ROP_CODES: PhfMap<ProtocolCommand, u64> = phf_map! {
-//     &FindNodes => 1_u64,
-//     &ListNodes => 2_u64,
-//     &UploadArchive => 3_u64,
-// };
-
-static OP_CODES: PhfMap<u64, ProtocolCommand> = phf_map! {
-    1_u64 => FindNodes,
-    2_u64 => ListNodes,
-    3_u64 => UploadArchive,
-};
 
 
 impl<'a> ProtocolServer<'a> {
@@ -102,8 +80,8 @@ impl<'a> ProtocolServer<'a> {
         try!(err.write(format!("listing nodes...\n").as_bytes()));
 
         for node in repo.iter_nodes() {
-            self.writer.write_u8(1);
-            self.writer.write(node.get_uuid().as_bytes());
+            try!(self.writer.write_u8(1));
+            try!(self.writer.write(node.get_uuid().as_bytes()));
             node_count += 1;
         }
         try!(err.write(format!("    sent {} nodes\n", node_count).as_bytes()));
@@ -115,8 +93,8 @@ impl<'a> ProtocolServer<'a> {
     fn dispatch_upload_archive(&mut self, repo: &Repository) -> IoResult<()> {
         let object_id = Uuid::new_v4();
         let object_id_str = object_id.to_hyphenated_string();
-        let mut err = stderr();
-        err.write(format!("SERVER: obj:{} create\n", object_id_str).as_bytes());
+        let mut stderr_writer = stderr();
+        stderr_writer.write(format!("SERVER: obj:{} create\n", object_id_str).as_bytes());
 
         let mut tmp_path = repo.get_root().clone();
         tmp_path.push(format!("{}.tmp", object_id_str).as_slice());
@@ -146,17 +124,18 @@ impl<'a> ProtocolServer<'a> {
         };
         match result {
             Ok(_) => {
-                let buf = object_id.as_bytes();
-                if buf.len() != 16 {
-                    fail!("fail");
-                }
+                stderr_writer.write(format!("SERVER: obj:{} commit\n", object_id_str).as_bytes());
                 try!(rename(&tmp_path, &final_path));
                 try!(self.writer.write(b"\x01"));
-                try!(self.writer.write(buf));
+                try!(self.writer.write(object_id.as_bytes()));
                 try!(self.writer.flush());
                 Ok(())
             }
             Err(err) => {
+                stderr_writer.write(format!(
+                    "SERVER: obj:{} rollback: {}\n",
+                    object_id_str, err
+                ).as_bytes());
                 try!(self.writer.write(b"\x00"));
                 try!(unlink(&tmp_path));
                 try!(self.writer.flush());
@@ -165,11 +144,12 @@ impl<'a> ProtocolServer<'a> {
         }
     }
 
-    fn dispatch(&mut self, repo: &Repository, command: &ProtocolCommand) -> IoResult<()> {
+    fn dispatch(&mut self, repo: &Repository, command: ProtocolCommand) -> IoResult<()> {
         Ok(match command {
-            &FindNodes => try!(self.dispatch_find_nodes(repo)),
-            &ListNodes => try!(self.dispatch_list_nodes(repo)),
-            &UploadArchive => try!(self.dispatch_upload_archive(repo)),
+            Quit => (),
+            FindNodes => try!(self.dispatch_find_nodes(repo)),
+            ListNodes => try!(self.dispatch_list_nodes(repo)),
+            UploadArchive => try!(self.dispatch_upload_archive(repo)),
         })
     }
 
@@ -177,23 +157,24 @@ impl<'a> ProtocolServer<'a> {
         let mut stderr_writer = stderr();
         let is_valid = try!(self.read_magic());
         if !is_valid {
-            // ProtocolError("Invalid magic")
-            fail!("Invalid magic");
+            try!(stderr_writer.write("Invalid magic".as_bytes()));
+            try!(stderr_writer.flush());
+            return Ok(()); // FIXME?
         }
         try!(self.writer.write(MAGIC_RESPONSE));
 
         loop {
             let op_code = try!(self.reader.read_be_u64());
-            if op_code == 0 {
-                break;
-            }
             try!(stderr_writer.write(format!("handling OP{}\n", op_code).as_bytes()));
             try!(stderr_writer.flush());
-            match OP_CODES.find(&op_code) {
+            let op_code: Option<ProtocolCommand> = FromPrimitive::from_u64(op_code);
+            match op_code {
+                Some(Quit) => break,
                 Some(val) => try!(self.dispatch(repo, val)),
                 None => {
-                    // ProtocolError("Invalid op-code: {}", op_code);
-                    fail!("Invalid op-code: {}", op_code);
+                    try!(stderr_writer.write("Invalid magic".as_bytes()));
+                    try!(stderr_writer.flush());
+                    return Ok(()); // FIXME?
                 }
             }
         }

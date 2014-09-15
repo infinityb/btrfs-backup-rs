@@ -151,11 +151,17 @@ def main(argv):
         os.path.join(subv_root, snapshot_name)
     ]).wait() == 0
     assert subprocess.Popen(['sync']).wait() == 0
-    sp_btrfs = subprocess.Popen([
-        '/root/bin/reliable-encap', '--', 'btrfs', 'send', '-p',
-        os.path.join(subv_root, good_parent.path),
-        os.path.join(subv_root, snapshot_name),
-    ], stdout=subprocess.PIPE)
+    if good_parent:
+        sp_btrfs = subprocess.Popen([
+            '/root/bin/reliable-encap', '--', 'btrfs', 'send', '-p',
+            os.path.join(subv_root, good_parent.path),
+            os.path.join(subv_root, snapshot_name),
+        ], stdout=subprocess.PIPE)
+    else:
+        sp_btrfs = subprocess.Popen([
+            '/root/bin/reliable-encap', '--', 'btrfs', 'send',
+            os.path.join(subv_root, snapshot_name),
+        ], stdout=subprocess.PIPE)
     while True:
         buf = sp_btrfs.stdout.read(2 ** 16)
         if not buf:

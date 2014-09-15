@@ -9,7 +9,8 @@ use btrfs::{
     BtrfsSubvolCommand,
     BtrfsSubvol,
     BtrfsSnapshotCommand,
-    BtrfsSnapshot
+    BtrfsSnapshot,
+    BtrfsUnknownCommand
 };
 use std::io::fs::readdir;
 
@@ -32,8 +33,8 @@ pub struct BackupNode {
 
 impl BackupNode {
     fn from_btrfs_command(path: &Path, command: &BtrfsCommand) -> BackupNode {
-        match command {
-            &BtrfsSubvolCommand(ref subvol) => {
+        match command.kind {
+            BtrfsSubvolCommand(ref subvol) => {
                 BackupNode {
                     kind: FullBackup(subvol.clone()),
                     uuid: subvol.uuid.clone(),
@@ -41,13 +42,16 @@ impl BackupNode {
                     name: subvol.name.clone(),
                 }
             },
-            &BtrfsSnapshotCommand(ref snap) => {
+            BtrfsSnapshotCommand(ref snap) => {
                 BackupNode {
                     kind: IncrementalBackup(snap.clone()),
                     uuid: snap.uuid.clone(),
                     path: path.clone(),
                     name: snap.name.clone()
                 }
+            },
+            BtrfsUnknownCommand(command) => {
+                fail!("invalid command {}", command);
             }
         }
     }

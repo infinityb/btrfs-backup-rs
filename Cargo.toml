@@ -9,16 +9,14 @@ name = "backupserver"
 path = "src/server.rs"
 
 
+[[bin]]
+name = "btrfs_command"
+path = "src/btrfs_command.rs"
+
+
 [dependencies.reliable-rw]
 git = "https://github.com/infinityb/reliable-rw-rust"
 
 
 [dependencies.uuid]
 git = "https://github.com/rust-lang/uuid"
-
-
-[dependencies.phf]
-git = "https://github.com/sfackler/rust-phf"
-
-[dependencies.phf_mac]
-git = "https://github.com/sfackler/rust-phf"

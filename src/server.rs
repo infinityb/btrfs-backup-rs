@@ -2,11 +2,7 @@
 extern crate serialize;
 extern crate debug;
 
-#[phase(plugin)]
-extern crate phf_mac;
-
 extern crate uuid;
-extern crate phf;
 
 extern crate reliable_rw;
 
@@ -61,5 +57,8 @@ fn main() {
     let mut stdin = stdin();
     let mut stdout = stdout();
     let mut proto = Protocol::new(&mut stdin, &mut stdout);
-    proto.run(&foo);
+    match proto.run(&foo) {
+        Ok(_) => (),
+        Err(err) => fail!("Error running protocol: {}", err)
+    };
 }
