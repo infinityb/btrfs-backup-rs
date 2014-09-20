@@ -3,9 +3,10 @@ use std::io::fs::{rename, unlink};
 use std::collections::HashSet;
 
 use uuid::Uuid;
+use msgpack;
 use reliable_rw::{copy_out, ProtocolError, IntegrityError, ReadError, WriteError};
 
-use repository::Repository;
+use repository::{Repository, FullBackup, IncrementalBackup};
 
 
 static MAGIC_REQUEST: &'static [u8] = b"\xa8\x5b\x4b\x2b\x1b\x75\x4c\x0a";
@@ -16,13 +17,42 @@ pub struct ProtocolServer<'a> {
     writer: &'a mut Writer+'a
 }
 
+#[deriving(Encodable, Decodable)]
+pub struct Edge {
+    size: u64,
+    from_node: Option<Uuid>,
+    to_node: Uuid
+}
 
-#[deriving(FromPrimitive, PartialEq)]
+
+impl Edge {
+    pub fn is_root(&self) -> bool {
+        self.from_node.is_none()
+    }
+}
+
+
+#[deriving(Encodable, Decodable)]
+pub struct Graph {
+    edges: Vec<Edge>
+}
+
+impl Graph {
+    pub fn new() -> Graph {
+        Graph {
+            edges: Vec::new()
+        }
+    }
+}
+
+
+#[deriving(FromPrimitive, PartialEq, Show)]
 pub enum ProtocolCommand {
     Quit = 0,
     FindNodes = 1,
     ListNodes = 2,
     UploadArchive = 3,
+    GetGraph = 4,
 }
 
 
@@ -130,7 +160,7 @@ impl<'a> ProtocolServer<'a> {
                 try!(self.writer.write(object_id.as_bytes()));
                 try!(self.writer.flush());
                 Ok(())
-            }
+            },
             Err(err) => {
                 stderr_writer.write(format!(
                     "SERVER: obj:{} rollback: {}\n",
@@ -144,12 +174,47 @@ impl<'a> ProtocolServer<'a> {
         }
     }
 
+    fn dispatch_get_graph(&mut self, repo: &Repository) -> IoResult<()> {
+        let mut graph = Graph::new();
+        graph.edges.reserve(repo.nodes.len());
+
+        for node in repo.nodes.iter() {
+            graph.edges.push(match node.kind {
+                FullBackup(ref subv) => {
+                    Edge {
+                        size: 0,
+                        from_node: None,
+                        to_node: subv.uuid.clone()
+                    }
+                },
+                IncrementalBackup(ref snap) => {
+                    Edge {
+                        size: 0,
+                        from_node: Some(snap.clone_uuid.clone()),
+                        to_node: snap.uuid
+                    }
+                }
+            });
+        }
+
+        let encoded = match msgpack::Encoder::to_msgpack(&graph) {
+            Ok(encoded) => encoded,
+            Err(err) => fail!("encoding graph failed")
+        };
+
+        try!(self.writer.write_le_u32(encoded.len() as u32));
+        try!(self.writer.write(encoded.as_slice()));
+
+        Ok(())
+    }
+
     fn dispatch(&mut self, repo: &Repository, command: ProtocolCommand) -> IoResult<()> {
         Ok(match command {
             Quit => (),
             FindNodes => try!(self.dispatch_find_nodes(repo)),
             ListNodes => try!(self.dispatch_list_nodes(repo)),
             UploadArchive => try!(self.dispatch_upload_archive(repo)),
+            GetGraph => try!(self.dispatch_get_graph(repo)),
         })
     }
 
@@ -164,10 +229,10 @@ impl<'a> ProtocolServer<'a> {
         try!(self.writer.write(MAGIC_RESPONSE));
 
         loop {
-            let op_code = try!(self.reader.read_be_u64());
-            try!(stderr_writer.write(format!("handling OP{}\n", op_code).as_bytes()));
+            let op_code: Option<ProtocolCommand> = FromPrimitive::from_u64(
+                try!(self.reader.read_be_u64()));
+            try!(stderr_writer.write(format!("handling {}\n", op_code).as_bytes()));
             try!(stderr_writer.flush());
-            let op_code: Option<ProtocolCommand> = FromPrimitive::from_u64(op_code);
             match op_code {
                 Some(Quit) => break,
                 Some(val) => try!(self.dispatch(repo, val)),

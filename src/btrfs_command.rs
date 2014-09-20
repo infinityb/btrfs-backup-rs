@@ -7,6 +7,7 @@ use std::os::args_as_bytes;
 
 use btrfs::BtrfsCommandIter;
 mod btrfs;
+mod crc32;
 
 
 fn main() {
@@ -34,6 +35,10 @@ fn main() {
     };
 
     for command in command_iter {
+        if !command.validate_crc32() {
+            println!("invalid CRC32");
+            break;
+        }
         println!("{:?}", command);
     }
 }

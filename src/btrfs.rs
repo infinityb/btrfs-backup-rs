@@ -1,6 +1,7 @@
 use uuid::Uuid;
+use std::io::{BufReader, BufWriter, IoResult, IoError, File};
+use crc32::crc32c;
 
-use std::io::{BufReader, IoResult, IoError};
 
 static BTRFS_HEADER_MAGIC: &'static [u8] = b"btrfs-stream\x00";
 
@@ -10,9 +11,29 @@ static BTRFS_SAMPLE_SUBVOL: &'static [u8] = b"btrfs-stream\x00\x01\x00\x00\x00:\
 #[cfg(test)]
 static BTRFS_SAMPLE_SNAPSHOT: &'static [u8] = b"btrfs-stream\x00\x01\x00\x00\x00Z\x00\x00\x00\x02\x00\xd78\x04+\x0f\x00\x16\x00root_jessie_2014-08-25\x01\x00\x10\x00\x19\xf1vb=y\x94O\xb4\x0fm\xcc\x1dy@\xd1\x02\x00\x08\x00?)\x00\x00\x00\x00\x00\x00\x14\x00\x10\x00\x8a\xcf\\z3\x0ciD\xa7\x13\xa8\xfb\xa5v\x15x\x15\x00\x08\x00\xd2\x18\x00\x00\x00\x00\x00\x004\x00\x00\x00\x14\x00\r\xe5\xc0%\x0f";
 
+
+#[deriving(Show)]
+pub enum BtrfsParseError {
+    InvalidVersion,
+    ProtocolError(String),
+    ReadError(IoError)
+}
+
+type BtrfsParseResult<T> = Result<T, BtrfsParseError>;
+
+#[deriving(Show)]
+pub enum BtrfsConcatError {
+    InvalidOrder,
+    FileOpenError(IoError),
+    ParseError(BtrfsParseError)
+}
+
+type BtrfsConcatResult<T> = Result<T, BtrfsConcatError>;
+
+
 #[allow(non_camel_case_types)]
-#[deriving(FromPrimitive, PartialEq)]
-enum BtrfsCommandType2 {
+#[deriving(FromPrimitive, PartialEq, Clone, Show)]
+pub enum BtrfsCommandType {
     BTRFS_SEND_C_UNSPEC,
     BTRFS_SEND_C_SUBVOL,
     BTRFS_SEND_C_SNAPSHOT,
@@ -38,15 +59,10 @@ enum BtrfsCommandType2 {
     BTRFS_SEND_C_UPDATE_EXTENT
 }
 
-pub enum BtrfsCommandType {
-    BtrfsSubvolCommand(BtrfsSubvol),
-    BtrfsSnapshotCommand(BtrfsSnapshot),
-    BtrfsUnknownCommand(u16)
-}
 
+#[deriving(Clone)]
 pub struct BtrfsCommand {
     pub len: u32,
-    pub kind2: BtrfsCommandType2,
     pub kind: BtrfsCommandType,
     pub crc32: u32,
     pub data: Vec<u8>
@@ -54,6 +70,17 @@ pub struct BtrfsCommand {
 
 
 impl BtrfsCommand {
+    pub fn from_kind(kind: BtrfsCommandType, data: Vec<u8>) -> BtrfsCommand {
+        let mut out = BtrfsCommand {
+            len: data.len() as u32,
+            kind: kind,
+            crc32: 0,
+            data: data
+        };
+        out.crc32 = out.calculate_crc32();
+        out
+    }
+
     pub fn parse(reader: &mut Reader) -> Result<BtrfsCommand, BtrfsParseError> {
         let len = match reader.read_le_u32() {
             Ok(length) => length,
@@ -64,7 +91,7 @@ impl BtrfsCommand {
             Err(err) => return Err(ReadError(err))
         };
         let crc32 = match reader.read_le_u32() {
-            Ok(length) => length,
+            Ok(crc) => crc,
             Err(err) => return Err(ReadError(err))
         };
         let buf = match reader.read_exact(len as uint) {
@@ -73,27 +100,54 @@ impl BtrfsCommand {
         };
         let buf_copy = buf.clone();
         let mut command_part = BufReader::new(buf_copy.as_slice());
-        let kind = match command {
-            1 => BtrfsSubvolCommand(try!(BtrfsSubvol::parse(&mut command_part))),
-            2 => BtrfsSnapshotCommand(try!(BtrfsSnapshot::parse(&mut command_part))),
-            other => BtrfsUnknownCommand(other)
-        };
         Ok(BtrfsCommand {
             len: len,
-            kind2: FromPrimitive::from_u16(command).unwrap(),
-            kind: kind,
+            kind: FromPrimitive::from_u16(command).unwrap(),
             crc32: crc32,
             data: buf
         })
     }
-}
 
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut self_w_crc = self.clone();
+        let cap = (10 + self.len) as uint;
+        let mut buf: Vec<u8> = Vec::from_fn(cap, |_| 0);
+        self_w_crc.crc32 = self_w_crc.calculate_crc32();
+        {
+            let mut writer = BufWriter::new(buf.as_mut_slice());
+            writer.write_le_u32(self_w_crc.len);
+            writer.write_le_u16(self_w_crc.kind as u16);
+            writer.write_le_u32(self_w_crc.crc32);
+            writer.write(self_w_crc.data.as_slice());
+        }
+        buf
+    }
 
-#[deriving(Show)]
-pub enum BtrfsParseError {
-    InvalidVersion,
-    ProtocolError(String),
-    ReadError(IoError)
+    pub fn validate_crc32(&self) -> bool {
+        let calc_crc32 = self.calculate_crc32();
+        let out = calc_crc32 == self.crc32;
+        if !out {
+            println!("{} != {}", calc_crc32, self.crc32);
+        }
+        return out;
+    }
+
+    pub fn calculate_crc32(&self) -> u32 {
+        assert_eq!(self.data.len(), self.len as uint);
+        let mut buf = Vec::with_capacity(self.data.len() + 10);
+
+        let mut header_buf = [0_u8, ..10];
+        {
+            let mut writer = BufWriter::new(header_buf);
+            writer.write_le_u32(self.len);
+            writer.write_le_u16(self.kind as u16);
+            writer.write_le_u32(0_u32);
+        }
+        buf = buf.append(header_buf);
+        buf = buf.append(self.data.as_slice());
+
+        crc32c(0, buf.as_slice())
+    }
 }
 
 
@@ -172,6 +226,20 @@ impl BtrfsSubvol {
             uuid: uuid,
             ctransid: ctransid
         })
+    }
+
+    pub fn encap(&self) -> BtrfsCommand {
+        let cap = 4 * 3 + self.name.len() + 16 + 8;
+        let mut data: Vec<u8> = Vec::from_fn(cap as uint, |_| 0);
+        {
+            let mut writer = BufWriter::new(data.as_mut_slice());
+            tlv_push(&mut writer, 15, self.name.as_slice());
+            tlv_push(&mut writer, 1, self.uuid.as_bytes());
+            writer.write_le_u16(2);
+            writer.write_le_u16(8);
+            writer.write_le_u64(self.ctransid);
+        }
+        BtrfsCommand::from_kind(BTRFS_SEND_C_SUBVOL, data)
     }
 }
 
@@ -259,6 +327,24 @@ impl BtrfsSnapshot {
             clone_ctransid: clone_ctransid
         })
     }
+
+    pub fn encap(&self) -> BtrfsCommand {
+        let cap = 4 * 5 + self.name.len() + 2 * 16 + 8 + 8;
+        let mut data: Vec<u8> = Vec::from_fn(cap as uint, |_| 0);
+        {
+            let mut writer = BufWriter::new(data.as_mut_slice());
+            tlv_push(&mut writer, 15, self.name.as_slice());
+            tlv_push(&mut writer, 1, self.uuid.as_bytes());
+            writer.write_le_u16(2);
+            writer.write_le_u16(8);
+            writer.write_le_u64(self.ctransid);
+            tlv_push(&mut writer, 20, self.clone_uuid.as_bytes());
+            writer.write_le_u16(21);
+            writer.write_le_u16(8);
+            writer.write_le_u64(self.clone_ctransid);
+        }
+        BtrfsCommand::from_kind(BTRFS_SEND_C_SNAPSHOT, data)
+    }
 }
 
 
@@ -278,6 +364,11 @@ fn tlv_read(reader: &mut Reader) -> IoResult<BtrfsTlvType> {
     })
 }
 
+fn tlv_push(writer: &mut Writer, tlv_type: u16, buf: &[u8]) {
+    writer.write_le_u16(tlv_type);
+    writer.write_le_u16(buf.len() as u16);
+    writer.write(buf);
+}
 
 pub struct BtrfsCommandIter<'a> {
     reader: &'a mut Reader+'a,
@@ -305,7 +396,7 @@ impl<'a> Iterator<BtrfsCommand> for BtrfsCommandIter<'a> {
         }
         match BtrfsCommand::parse(self.reader) {
             Ok(command) => {
-                if command.kind2 == BTRFS_SEND_C_END {
+                if command.kind == BTRFS_SEND_C_END {
                     self.is_finished = true;
                 }
                 Some(command)

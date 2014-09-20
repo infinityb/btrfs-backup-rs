@@ -1,8 +1,8 @@
-#![feature(phase)]
 extern crate serialize;
 extern crate debug;
 
 extern crate uuid;
+extern crate msgpack;
 
 extern crate reliable_rw;
 
@@ -16,6 +16,8 @@ use protocol::ProtocolServer as Protocol;
 mod repository;
 mod protocol;
 mod btrfs;
+mod crc32;
+
 
 
 fn print_usage(program: &[u8]) {

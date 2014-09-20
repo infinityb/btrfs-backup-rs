@@ -5,8 +5,18 @@ authors = ["Stacey Ell <stacey.ell@gmail.com>"]
 
 
 [[bin]]
+name = "tmp_poc"
+path = "src/tmp_poc.rs"
+
+
+[[bin]]
 name = "backupserver"
 path = "src/server.rs"
+
+
+[[bin]]
+name = "btrfs_concat"
+path = "src/btrfs_concat.rs"
 
 
 [[bin]]
@@ -20,3 +30,7 @@ git = "https://github.com/infinityb/reliable-rw-rust"
 
 [dependencies.uuid]
 git = "https://github.com/rust-lang/uuid"
+
+
+[dependencies.msgpack]
+git = "git://github.com/mneumann/rust-msgpack.git"

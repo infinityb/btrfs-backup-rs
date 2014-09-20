@@ -88,6 +88,13 @@ class ProtocolClient(object):
             out.append(UUID(bytes=self.reader.read(16)))
         return out
 
+    def get_graph(self):
+        self.writer.write(struct.pack('>Q', 4))
+        (len_,) = struct.unpack(
+            '>I',
+            self.reader.read(struct.calcsize('>I')))
+        print("graph_response: {!r}".format(self.reader.read(len_)))
+
     def upload_archive(self):
         self.writer.write(struct.pack('>Q', 3))
         return self.writer
@@ -141,6 +148,8 @@ def main(argv):
     good_parent = recs.find_latest(remote_candidates)
     print("Found a good parent: {!r}".format(good_parent))
 
+    client.get_graph()
+    __import__('sys').exit()
     archive = client.upload_archive()
     snapshot_name = '{}_{}' \
         .format(subv_name, datetime.datetime.now()) \
