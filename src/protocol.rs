@@ -26,9 +26,9 @@ pub struct Edge {
 
 
 impl Edge {
-    pub fn is_root(&self) -> bool {
-        self.from_node.is_none()
-    }
+    // pub fn is_root(&self) -> bool {
+    //     self.from_node.is_none()
+    // }
 }
 
 
@@ -89,7 +89,7 @@ impl<'a> ProtocolServer<'a> {
 
     fn dispatch_find_nodes(&mut self, repo: &Repository) -> IoResult<()> {
         let want_parents: HashSet<Uuid> = try!(self.read_parent_list())
-                .move_iter().collect();
+                .into_iter().collect();
 
         let have_parents: HashSet<Uuid> = repo.iter_nodes()
                 .map(|node| node.get_uuid().clone()).collect();
@@ -124,7 +124,11 @@ impl<'a> ProtocolServer<'a> {
         let object_id = Uuid::new_v4();
         let object_id_str = object_id.to_hyphenated_string();
         let mut stderr_writer = stderr();
-        stderr_writer.write(format!("SERVER: obj:{} create\n", object_id_str).as_bytes());
+        
+        assert!(stderr_writer.write(format!(
+            "SERVER: obj:{} create\n",
+            object_id_str
+        ).as_bytes()).is_ok());
 
         let mut tmp_path = repo.get_root().clone();
         tmp_path.push(format!("{}.tmp", object_id_str).as_slice());
@@ -154,7 +158,10 @@ impl<'a> ProtocolServer<'a> {
         };
         match result {
             Ok(_) => {
-                stderr_writer.write(format!("SERVER: obj:{} commit\n", object_id_str).as_bytes());
+                assert!(stderr_writer.write(format!(
+                    "SERVER: obj:{} commit\n",
+                    object_id_str
+                ).as_bytes()).is_ok());
                 try!(rename(&tmp_path, &final_path));
                 try!(self.writer.write(b"\x01"));
                 try!(self.writer.write(object_id.as_bytes()));
@@ -162,10 +169,10 @@ impl<'a> ProtocolServer<'a> {
                 Ok(())
             },
             Err(err) => {
-                stderr_writer.write(format!(
+                assert!(stderr_writer.write(format!(
                     "SERVER: obj:{} rollback: {}\n",
                     object_id_str, err
-                ).as_bytes());
+                ).as_bytes()).is_ok());
                 try!(self.writer.write(b"\x00"));
                 try!(unlink(&tmp_path));
                 try!(self.writer.flush());
@@ -199,7 +206,7 @@ impl<'a> ProtocolServer<'a> {
 
         let encoded = match msgpack::Encoder::to_msgpack(&graph) {
             Ok(encoded) => encoded,
-            Err(err) => fail!("encoding graph failed")
+            Err(err) => fail!("encoding graph failed: {}", err)
         };
 
         try!(self.writer.write_le_u32(encoded.len() as u32));

@@ -98,7 +98,6 @@ impl BtrfsCommand {
             Ok(buf) => buf,
             Err(err) => return Err(ReadError(err))
         };
-        let buf_copy = buf.clone();
         Ok(BtrfsCommand {
             len: len,
             kind: FromPrimitive::from_u16(command).unwrap(),
@@ -138,9 +137,9 @@ impl BtrfsCommand {
         let mut header_buf = [0_u8, ..10];
         {
             let mut writer = BufWriter::new(header_buf);
-            writer.write_le_u32(self.len);
-            writer.write_le_u16(self.kind as u16);
-            writer.write_le_u32(0_u32);
+            assert!(writer.write_le_u32(self.len).is_ok());
+            assert!(writer.write_le_u16(self.kind as u16).is_ok());
+            assert!(writer.write_le_u32(0_u32).is_ok());
         }
         buf = buf.append(header_buf);
         buf = buf.append(self.data.as_slice());
@@ -242,9 +241,9 @@ impl BtrfsSubvol {
             let mut writer = BufWriter::new(data.as_mut_slice());
             tlv_push(&mut writer, 15, self.name.as_slice());
             tlv_push(&mut writer, 1, self.uuid.as_bytes());
-            writer.write_le_u16(2);
-            writer.write_le_u16(8);
-            writer.write_le_u64(self.ctransid);
+            assert!(writer.write_le_u16(2).is_ok());
+            assert!(writer.write_le_u16(8).is_ok());
+            assert!(writer.write_le_u64(self.ctransid).is_ok());
         }
         BtrfsCommand::from_kind(BTRFS_SEND_C_SUBVOL, data)
     }
@@ -376,9 +375,9 @@ fn tlv_read(reader: &mut Reader) -> IoResult<BtrfsTlvType> {
 }
 
 fn tlv_push(writer: &mut Writer, tlv_type: u16, buf: &[u8]) {
-    writer.write_le_u16(tlv_type);
-    writer.write_le_u16(buf.len() as u16);
-    writer.write(buf);
+    assert!(writer.write_le_u16(tlv_type).is_ok());
+    assert!(writer.write_le_u16(buf.len() as u16).is_ok());
+    assert!(writer.write(buf).is_ok());
 }
 
 pub struct BtrfsCommandIter<'a> {

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 extern crate uuid;
 extern crate debug;
 
@@ -21,7 +22,7 @@ fn main() {
         [_, ref filename] => vec![filename.clone()],
         [_, rest..] => Vec::from_slice(rest)
     };
-    let paths: Vec<Path> = filenames.move_iter().map(|x| Path::new(x)).collect();
+    let paths: Vec<Path> = filenames.into_iter().map(|x| Path::new(x)).collect();
 
     for filename in paths.iter() {
         let mut reader = match File::open(filename) {

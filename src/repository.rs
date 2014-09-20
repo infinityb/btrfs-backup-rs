@@ -1,6 +1,7 @@
-use std::io::{File, BufReader, BufferedReader, IoResult, stderr};
+use std::io::{File, BufReader, BufferedReader, IoResult};
+use std::io::fs::readdir;
 use std::slice::Items;
-use std::collections::{HashSet, RingBuf, Deque};
+use std::collections::HashSet;
 
 use uuid::Uuid;
 
@@ -12,7 +13,6 @@ use btrfs::{
     BTRFS_SEND_C_SUBVOL,
     BTRFS_SEND_C_SNAPSHOT,
 };
-use std::io::fs::readdir;
 
 
 pub enum BackupNodeKind {
@@ -23,10 +23,10 @@ pub enum BackupNodeKind {
 
 pub struct BackupNode {
     pub kind: BackupNodeKind,
-    uuid: Uuid,
-    parent_uuid: Option<Uuid>,
-    path: Path,
-    name: Vec<u8>
+    pub uuid: Uuid,
+    pub parent_uuid: Option<Uuid>,
+    pub path: Path,
+    pub name: Vec<u8>
 }
 
 
@@ -37,7 +37,7 @@ impl BackupNode {
             BTRFS_SEND_C_SUBVOL => {
                 let subvol = match BtrfsSubvol::parse(&mut reader) {
                     Ok(subvol) => subvol,
-                    Err(err) => fail!("err: {}")
+                    Err(err) => fail!("err: {}", err)
                 };
                 BackupNode {
                     kind: FullBackup(subvol.clone()),
@@ -50,7 +50,7 @@ impl BackupNode {
             BTRFS_SEND_C_SNAPSHOT => {
                 let snap = match BtrfsSnapshot::parse(&mut reader) {
                     Ok(snap) => snap,
-                    Err(err) => fail!("err: {}")
+                    Err(err) => fail!("err: {}", err)
                 };
                 BackupNode {
                     kind: IncrementalBackup(snap.clone()),
@@ -86,7 +86,7 @@ struct FsckReachabilityRecord {
 
 
 impl FsckReachabilityRecord {
-    pub fn from_node(node: &BackupNode) -> Option<FsckReachabilityRecord> {
+    fn from_node(node: &BackupNode) -> Option<FsckReachabilityRecord> {
         match node.parent_uuid {
             Some(ref parent_uuid) => Some(FsckReachabilityRecord {
                 is_reachable: false,
@@ -108,13 +108,11 @@ impl Repository {
     }
 
     pub fn load_from(path: &Path) -> IoResult<Repository> {
-        let mut repository = Repository::new(path);
-        repository.load(true)
+        Repository::new(path).load(true)
     }
 
     pub fn load_from_nofsck(path: &Path) -> IoResult<Repository> {
-        let mut repository = Repository::new(path);
-        repository.load(false)
+        Repository::new(path).load(false)
     }
 
     fn load(mut self, fsck: bool) -> IoResult<Repository> {
@@ -135,17 +133,12 @@ impl Repository {
                 }
             }
         }
-        let mut err = stderr();
-        
+
         if fsck {
-            let node_count_before = self.nodes.len();
             let orphans = self.find_orphans();
-            self.nodes = self.nodes.move_iter()
+            self.nodes = self.nodes.into_iter()
                 .filter(|n| !orphans.contains(&n.uuid))
                 .collect();
-            let node_count_after = self.nodes.len();
-            err.write_str(format!("loaded repository with {} nodes, but showing {}\n",
-                node_count_before, node_count_after).as_slice());
         }
 
         Ok(self)
@@ -159,7 +152,7 @@ impl Repository {
         &self.root
     }
 
-    fn find_orphans(&self) -> HashSet<Uuid> {
+    pub fn find_orphans(&self) -> HashSet<Uuid> {
         let mut root_reachable: HashSet<Uuid> = HashSet::new();
         let mut records: Vec<FsckReachabilityRecord> = Vec::new();
 
@@ -172,7 +165,6 @@ impl Repository {
             }
         }
 
-        let mut stderr_w = stderr();
         loop {
             let mut changed = false;
             let mut reachables_found: uint = 0;
@@ -190,8 +182,8 @@ impl Repository {
                 }
             }
 
-            // Rewrite the list if 75% of it is reachable
-            if (total_scanned * 3 <= 4 * reachables_found) {
+            // Rewrite the list if >= 75% of it is reachable
+            if total_scanned * 3 <= 4 * reachables_found {
                 records.retain(|r| !r.is_reachable);
             }
             if !changed {

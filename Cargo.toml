@@ -10,6 +10,11 @@ path = "src/server.rs"
 
 
 [[bin]]
+name = "backupserver-fsck"
+path = "src/server_fsck.rs"
+
+
+[[bin]]
 name = "btrfs_concat"
 path = "src/btrfs_concat.rs"
 

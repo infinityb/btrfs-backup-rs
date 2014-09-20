@@ -7,12 +7,13 @@ extern crate msgpack;
 
 extern crate reliable_rw;
 
-
+use std::collections::HashMap;
 use std::os::{args_as_bytes, set_exit_status};
 use std::io::fs::stat;
-use std::io::{FileStat, TypeDirectory, stdin, stdout};
-use repository::{Repository};
-use protocol::ProtocolServer as Protocol;
+use std::io::{FileStat, TypeDirectory};
+use repository::{Repository, BackupNode};
+use uuid::Uuid;
+
 
 mod repository;
 mod protocol;
@@ -53,16 +54,27 @@ fn main() {
         Err(e) => fail!("stat error: {}", e)
     }
 
-    let foo = match Repository::load_from(&path) {
+    let foo = match Repository::load_from_nofsck(&path) {
         Ok(repo) => repo,
         Err(err) => fail!("Error while reading repository: {}", err)
     };
 
-    let mut stdin = stdin();
-    let mut stdout = stdout();
-    let mut proto = Protocol::new(&mut stdin, &mut stdout);
-    match proto.run(&foo) {
-        Ok(_) => (),
-        Err(err) => fail!("Error running protocol: {}", err)
-    };
+    let orphans = foo.find_orphans();
+
+    let mut by_uuid: HashMap<Uuid, Vec<BackupNode>> = HashMap::new();
+    for node in foo.nodes.into_iter() {
+        let nodes = by_uuid.find_or_insert(node.get_uuid().clone(), Vec::new());
+        nodes.push(node);
+    }
+
+    let mut orphan_nodes_lists = orphans.iter()
+        .map(|uu| by_uuid.pop(uu))
+        .filter(|opt_node_list| opt_node_list.is_some())
+        .map(|opt_node_list| opt_node_list.unwrap());
+
+    for orphan_nodes_list in orphan_nodes_lists {
+        for orphan_node in orphan_nodes_list.iter() {
+            println!("orphan: {}", orphan_node.path.display());
+        }
+    }
 }
