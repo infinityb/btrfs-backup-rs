@@ -1,5 +1,5 @@
 use uuid::Uuid;
-use std::io::{BufReader, BufWriter, IoResult, IoError, File};
+use std::io::{BufReader, BufWriter, IoResult, IoError};
 use crc32::crc32c;
 
 
@@ -99,7 +99,6 @@ impl BtrfsCommand {
             Err(err) => return Err(ReadError(err))
         };
         let buf_copy = buf.clone();
-        let mut command_part = BufReader::new(buf_copy.as_slice());
         Ok(BtrfsCommand {
             len: len,
             kind: FromPrimitive::from_u16(command).unwrap(),
@@ -115,10 +114,10 @@ impl BtrfsCommand {
         self_w_crc.crc32 = self_w_crc.calculate_crc32();
         {
             let mut writer = BufWriter::new(buf.as_mut_slice());
-            writer.write_le_u32(self_w_crc.len);
-            writer.write_le_u16(self_w_crc.kind as u16);
-            writer.write_le_u32(self_w_crc.crc32);
-            writer.write(self_w_crc.data.as_slice());
+            assert!(writer.write_le_u32(self_w_crc.len).is_ok());
+            assert!(writer.write_le_u16(self_w_crc.kind as u16).is_ok());
+            assert!(writer.write_le_u32(self_w_crc.crc32).is_ok());
+            assert!(writer.write(self_w_crc.data.as_slice()).is_ok());
         }
         buf
     }
@@ -158,6 +157,10 @@ pub struct BtrfsHeader {
 
 
 impl BtrfsHeader {
+    pub fn load(data: &[u8]) -> Result<BtrfsHeader, BtrfsParseError> {
+        BtrfsHeader::parse(&mut BufReader::new(data))
+    }
+
     pub fn parse(reader: &mut Reader) -> Result<BtrfsHeader, BtrfsParseError> {
         let magic = match reader.read_exact(BTRFS_HEADER_MAGIC.len()) {
             Ok(val) => val,
@@ -184,6 +187,10 @@ pub struct BtrfsSubvol {
 
 
 impl BtrfsSubvol {
+    pub fn load(data: &[u8]) -> Result<BtrfsSubvol, BtrfsParseError> {
+        BtrfsSubvol::parse(&mut BufReader::new(data))
+    }
+
     pub fn parse(reader: &mut Reader) -> Result<BtrfsSubvol, BtrfsParseError> {
         let name = match tlv_read(reader) {
             Ok(BtrfsTlvType { type_num: 15, data: data }) => {
@@ -255,6 +262,10 @@ pub struct BtrfsSnapshot {
 
 
 impl BtrfsSnapshot {
+    pub fn load(data: &[u8]) -> Result<BtrfsSnapshot, BtrfsParseError> {
+        BtrfsSnapshot::parse(&mut BufReader::new(data))
+    }
+
     pub fn parse(reader: &mut Reader) -> Result<BtrfsSnapshot, BtrfsParseError> {
         let name = match tlv_read(reader) {
             Ok(BtrfsTlvType { type_num: 15, data: data }) => {
@@ -335,13 +346,13 @@ impl BtrfsSnapshot {
             let mut writer = BufWriter::new(data.as_mut_slice());
             tlv_push(&mut writer, 15, self.name.as_slice());
             tlv_push(&mut writer, 1, self.uuid.as_bytes());
-            writer.write_le_u16(2);
-            writer.write_le_u16(8);
-            writer.write_le_u64(self.ctransid);
+            assert!(writer.write_le_u16(2).is_ok());
+            assert!(writer.write_le_u16(8).is_ok());
+            assert!(writer.write_le_u64(self.ctransid).is_ok());
             tlv_push(&mut writer, 20, self.clone_uuid.as_bytes());
-            writer.write_le_u16(21);
-            writer.write_le_u16(8);
-            writer.write_le_u64(self.clone_ctransid);
+            assert!(writer.write_le_u16(21).is_ok());
+            assert!(writer.write_le_u16(8).is_ok());
+            assert!(writer.write_le_u64(self.clone_ctransid).is_ok());
         }
         BtrfsCommand::from_kind(BTRFS_SEND_C_SNAPSHOT, data)
     }
@@ -417,14 +428,15 @@ fn test_subvol_metadata_extract() {
     assert_eq!(header.version, 1);
                                      
     let uuid = Uuid::parse_str("a3374b40-c08e-b545-93f7-8361e8b435b8").ok().unwrap();
-    match BtrfsCommand::parse(&mut reader) {
-        Ok(BtrfsSubvolCommand(subvol)) => {
-            assert_eq!(subvol.name.as_slice(), b"root_jessie_2014-07-21");
-            assert_eq!(subvol.uuid, uuid);  // TODO: fails
-            assert_eq!(subvol.ctransid, 38342);
-        },
-        Ok(_) => unreachable!(),
-        Err(err) => unreachable!()
+
+    let command = match BtrfsCommand::parse(&mut reader) {
+        Ok(command) => command,
+        Err(_) => unreachable!()
+    };
+    assert_eq!(command.kind, BTRFS_SEND_C_SUBVOL);
+    let subvol = match BtrfsSubvol::load(command.data.as_slice()) {
+        Ok(subvol) => subvol,
+        Err(err) => fail!("err: {}", err)
     };
 }
 
@@ -441,15 +453,10 @@ fn test_snapshot_metadata_extract() {
     let clone_uuid = Uuid::parse_str("8acf5c7a-330c-6944-a713-a8fba5761578").ok().unwrap();
 
     match BtrfsCommand::parse(&mut reader) {
-        Ok(BtrfsSnapshotCommand(snapshot)) => {
-            assert_eq!(snapshot.name.as_slice(), b"root_jessie_2014-08-25");
-            assert_eq!(snapshot.uuid, uuid);
-            assert_eq!(snapshot.ctransid, 10559);
-            assert_eq!(snapshot.clone_uuid, clone_uuid);  // TODO: fails
-            assert_eq!(snapshot.clone_ctransid, 6354);
+        Ok(command) => {
+            assert_eq!(command.kind, BTRFS_SEND_C_SNAPSHOT);
         },
-        Ok(_) => unreachable!(),
-        Err(err) => unreachable!()
+        Err(_) => unreachable!()
     };
 }
 

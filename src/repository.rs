@@ -78,6 +78,27 @@ pub struct Repository {
 }
 
 
+struct FsckReachabilityRecord {
+    is_reachable: bool,
+    uuid: Uuid,
+    parent_uuid: Uuid
+}
+
+
+impl FsckReachabilityRecord {
+    pub fn from_node(node: &BackupNode) -> Option<FsckReachabilityRecord> {
+        match node.parent_uuid {
+            Some(ref parent_uuid) => Some(FsckReachabilityRecord {
+                is_reachable: false,
+                uuid: node.uuid.clone(),
+                parent_uuid: parent_uuid.clone()
+            }),
+            None => None
+        }
+    }
+}
+
+
 impl Repository {
     pub fn new(path: &Path) -> Repository {
         Repository {
@@ -88,10 +109,15 @@ impl Repository {
 
     pub fn load_from(path: &Path) -> IoResult<Repository> {
         let mut repository = Repository::new(path);
-        repository.load()
+        repository.load(true)
     }
 
-    fn load(mut self) -> IoResult<Repository> {
+    pub fn load_from_nofsck(path: &Path) -> IoResult<Repository> {
+        let mut repository = Repository::new(path);
+        repository.load(false)
+    }
+
+    fn load(mut self, fsck: bool) -> IoResult<Repository> {
         let paths = try!(readdir(&self.root));
         for path in paths.iter() {
             match File::open(path) {
@@ -110,15 +136,18 @@ impl Repository {
             }
         }
         let mut err = stderr();
-        let orphans = self.find_orphans();
+        
+        if fsck {
+            let node_count_before = self.nodes.len();
+            let orphans = self.find_orphans();
+            self.nodes = self.nodes.move_iter()
+                .filter(|n| !orphans.contains(&n.uuid))
+                .collect();
+            let node_count_after = self.nodes.len();
+            err.write_str(format!("loaded repository with {} nodes, but showing {}\n",
+                node_count_before, node_count_after).as_slice());
+        }
 
-        let node_count_before = self.nodes.len();
-        self.nodes = self.nodes.move_iter()
-            .filter(|n| !orphans.contains(&n.uuid))
-            .collect();
-        let node_count_after = self.nodes.len();
-        err.write_str(format!("loaded repository with {} nodes, but showing {}\n",
-            node_count_before, node_count_after).as_slice());
         Ok(self)
     }
 
@@ -175,35 +204,5 @@ impl Repository {
             .map(|r| r.uuid)
             .collect();
         out
-    }
-
-    pub fn fsck(&self) {
-        let orphans = self.find_orphans();
-        let mut stderr_w = stderr();
-        stderr_w.write_str(format!("Found {} orphans\n", orphans.len()).as_slice());
-        for orphan in orphans.iter() {
-            stderr_w.write_str(format!("Found {} orphans\n", orphans.len()).as_slice());
-        }
-        stderr_w.flush();
-    }
-}
-
-
-struct FsckReachabilityRecord {
-    is_reachable: bool,
-    uuid: Uuid,
-    parent_uuid: Uuid
-}
-
-impl FsckReachabilityRecord {
-    pub fn from_node(node: &BackupNode) -> Option<FsckReachabilityRecord> {
-        match node.parent_uuid {
-            Some(ref parent_uuid) => Some(FsckReachabilityRecord {
-                is_reachable: false,
-                uuid: node.uuid.clone(),
-                parent_uuid: parent_uuid.clone()
-            }),
-            None => None
-        }
     }
 }

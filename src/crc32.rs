@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 static CRCTABLE : [u32, ..256] = [
 	0x00000000, 0xF26B8303, 0xE13B70F7, 0x1350F3F4,
 	0xC79A971F, 0x35F1141C, 0x26A1E7E8, 0xD4CA64EB,
@@ -66,6 +67,7 @@ static CRCTABLE : [u32, ..256] = [
 ];
 
 
+#[allow(dead_code)]
 pub fn crc32c(crc: u32, buf: &[u8]) -> u32 {
 	let mut crc = crc;
 

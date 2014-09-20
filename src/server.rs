@@ -19,7 +19,7 @@ mod btrfs;
 mod crc32;
 
 
-
+#[cfg(not(test))]
 fn print_usage(program: &[u8]) {
     let mut stderr = std::io::stderr();
     let mut out: Vec<u8> = Vec::new();
@@ -31,6 +31,7 @@ fn print_usage(program: &[u8]) {
 }
 
 
+#[cfg(not(test))]
 fn main() {
     let args_bytes = args_as_bytes();
     let program_name = args_bytes[0].as_slice().clone();

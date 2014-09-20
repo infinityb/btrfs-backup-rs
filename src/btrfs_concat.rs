@@ -10,6 +10,7 @@ mod btrfs;
 mod crc32;
 
 
+#[cfg(not(test))]
 fn main() {
     let filenames = match args_as_bytes().as_slice() {
         [] => fail!("impossible"),
