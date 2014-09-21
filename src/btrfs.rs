@@ -1,5 +1,5 @@
 use uuid::Uuid;
-use std::io::{BufReader, BufWriter, IoResult, IoError};
+use std::io::{BufReader, BufWriter, IoResult, IoError, EndOfFile};
 use crc32::crc32c;
 
 
@@ -19,7 +19,17 @@ pub enum BtrfsParseError {
     ReadError(IoError)
 }
 
-type BtrfsParseResult<T> = Result<T, BtrfsParseError>;
+pub type BtrfsParseResult<T> = Result<T, BtrfsParseError>;
+
+
+impl BtrfsParseError {
+    pub fn is_eof(err: &BtrfsParseError) -> bool {
+        match err {
+            &ReadError(ref ioerr) => ioerr.kind == EndOfFile,
+            _ => false
+        }
+    }
+}
 
 #[deriving(Show)]
 pub enum BtrfsConcatError {
@@ -174,6 +184,14 @@ impl BtrfsHeader {
         };
         Ok(BtrfsHeader { version: version })
     }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = [0u8, ..4];
+        BufWriter::new(buf).write_le_u32(self.version);
+        Vec::new()
+            .append(BTRFS_HEADER_MAGIC)
+            .append(buf)
+    }
 }
 
 
@@ -239,8 +257,8 @@ impl BtrfsSubvol {
         let mut data: Vec<u8> = Vec::from_fn(cap as uint, |_| 0);
         {
             let mut writer = BufWriter::new(data.as_mut_slice());
-            tlv_push(&mut writer, 15, self.name.as_slice());
-            tlv_push(&mut writer, 1, self.uuid.as_bytes());
+            assert!(tlv_push(&mut writer, 15, self.name.as_slice()).is_ok());
+            assert!(tlv_push(&mut writer, 1, self.uuid.as_bytes()).is_ok());
             assert!(writer.write_le_u16(2).is_ok());
             assert!(writer.write_le_u16(8).is_ok());
             assert!(writer.write_le_u64(self.ctransid).is_ok());
@@ -343,12 +361,12 @@ impl BtrfsSnapshot {
         let mut data: Vec<u8> = Vec::from_fn(cap as uint, |_| 0);
         {
             let mut writer = BufWriter::new(data.as_mut_slice());
-            tlv_push(&mut writer, 15, self.name.as_slice());
-            tlv_push(&mut writer, 1, self.uuid.as_bytes());
+            assert!(tlv_push(&mut writer, 15, self.name.as_slice()).is_ok());
+            assert!(tlv_push(&mut writer, 1, self.uuid.as_bytes()).is_ok());
             assert!(writer.write_le_u16(2).is_ok());
             assert!(writer.write_le_u16(8).is_ok());
             assert!(writer.write_le_u64(self.ctransid).is_ok());
-            tlv_push(&mut writer, 20, self.clone_uuid.as_bytes());
+            assert!(tlv_push(&mut writer, 20, self.clone_uuid.as_bytes()).is_ok());
             assert!(writer.write_le_u16(21).is_ok());
             assert!(writer.write_le_u16(8).is_ok());
             assert!(writer.write_le_u64(self.clone_ctransid).is_ok());
@@ -374,10 +392,11 @@ fn tlv_read(reader: &mut Reader) -> IoResult<BtrfsTlvType> {
     })
 }
 
-fn tlv_push(writer: &mut Writer, tlv_type: u16, buf: &[u8]) {
-    assert!(writer.write_le_u16(tlv_type).is_ok());
-    assert!(writer.write_le_u16(buf.len() as u16).is_ok());
-    assert!(writer.write(buf).is_ok());
+fn tlv_push(writer: &mut Writer, tlv_type: u16, buf: &[u8]) -> IoResult<()> {
+    try!(writer.write_le_u16(tlv_type));
+    try!(writer.write_le_u16(buf.len() as u16));
+    try!(writer.write(buf));
+    Ok(())
 }
 
 pub struct BtrfsCommandIter<'a> {

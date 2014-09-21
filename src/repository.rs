@@ -65,10 +65,6 @@ impl BackupNode {
             }
         }
     }
-
-    pub fn get_uuid<'a>(&'a self) -> &'a Uuid {
-        &self.uuid
-    }
 }
 
 

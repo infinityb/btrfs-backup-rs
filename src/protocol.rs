@@ -8,7 +8,6 @@ use reliable_rw::{copy_out, ProtocolError, IntegrityError, ReadError, WriteError
 
 use repository::{Repository, FullBackup, IncrementalBackup};
 
-
 static MAGIC_REQUEST: &'static [u8] = b"\xa8\x5b\x4b\x2b\x1b\x75\x4c\x0a";
 static MAGIC_RESPONSE: &'static [u8] = b"\xfb\x70\x4c\x63\x41\x1d\x9c\x0a";
 
@@ -89,10 +88,12 @@ impl<'a> ProtocolServer<'a> {
 
     fn dispatch_find_nodes(&mut self, repo: &Repository) -> IoResult<()> {
         let want_parents: HashSet<Uuid> = try!(self.read_parent_list())
-                .into_iter().collect();
+                .into_iter()
+                .collect();
 
         let have_parents: HashSet<Uuid> = repo.iter_nodes()
-                .map(|node| node.get_uuid().clone()).collect();
+                .map(|node| node.uuid.clone())
+                .collect();
 
         for cand in want_parents.intersection(&have_parents) {
             try!(self.writer.write_u8(1));
@@ -111,7 +112,7 @@ impl<'a> ProtocolServer<'a> {
 
         for node in repo.iter_nodes() {
             try!(self.writer.write_u8(1));
-            try!(self.writer.write(node.get_uuid().as_bytes()));
+            try!(self.writer.write(node.uuid.as_bytes()));
             node_count += 1;
         }
         try!(err.write(format!("    sent {} nodes\n", node_count).as_bytes()));

@@ -63,7 +63,7 @@ fn main() {
 
     let mut by_uuid: HashMap<Uuid, Vec<BackupNode>> = HashMap::new();
     for node in foo.nodes.into_iter() {
-        let nodes = by_uuid.find_or_insert(node.get_uuid().clone(), Vec::new());
+        let nodes = by_uuid.find_or_insert(node.uuid.clone(), Vec::new());
         nodes.push(node);
     }
 
