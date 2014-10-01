@@ -17,7 +17,6 @@ use btrfs::{
     BtrfsSnapshot,
     BtrfsParseResult,
     ReadError,
-    BtrfsCommandIter,
     BtrfsParseError,
     BTRFS_SEND_C_SUBVOL,
     BTRFS_SEND_C_SNAPSHOT,
@@ -53,7 +52,7 @@ impl BtrfsCommandConcatIter {
 
         assert_eq!(BtrfsHeader::parse(&mut last_reader).unwrap().version, 1);
         let last_snap_cmd = match BtrfsCommand::parse(&mut last_reader) {
-            Ok(command) => match BtrfsSnapshot::load(command.data.as_slice()) {
+            Ok(command) => match BtrfsSnapshot::load(command.data[]) {
                 Ok(snapshot) => Some(snapshot),
                 Err(err) => fail!("error reading last snapshot: {}", err)
             },
@@ -87,20 +86,20 @@ impl BtrfsCommandConcatIter {
     fn validation_hook(&mut self, command: &BtrfsCommand) -> BtrfsParseResult<()> {
         if command.kind == BTRFS_SEND_C_SUBVOL {
             assert!(self.curr_uuid.is_none());
-            match BtrfsSubvol::load(command.data.as_slice()) {
+            match BtrfsSubvol::load(command.data[]) {
                 Ok(subvol) => {
                     self.curr_uuid = Some(subvol.uuid);
                 },
-                Err(err) => fail!("err: {}")
+                Err(err) => fail!("err: {}", err)
             }
         }
         if command.kind == BTRFS_SEND_C_SNAPSHOT {
-            match BtrfsSnapshot::load(command.data.as_slice()) {
+            match BtrfsSnapshot::load(command.data[]) {
                 Ok(snap) => {
                     assert_eq!(self.curr_uuid, Some(snap.clone_uuid));
                     self.curr_uuid = Some(snap.uuid);
                 },
-                Err(err) => fail!("err: {}")
+                Err(err) => fail!("err: {}", err)
             }
         }
         Ok(())
@@ -121,7 +120,7 @@ impl BtrfsCommandConcatIter {
     #[inline]
     fn transform(&mut self, command: BtrfsCommand) -> BtrfsCommand {
         if self.last_snap_cmd.is_some() && command.kind == BTRFS_SEND_C_SUBVOL {
-            let mut subv = BtrfsSubvol::load(command.data.as_slice()).unwrap();
+            let mut subv = BtrfsSubvol::load(command.data[]).unwrap();
             subv.name = self.last_snap_cmd.take().unwrap().name;
             subv.encap()
         } else {
@@ -153,7 +152,10 @@ impl BtrfsCommandConcatIter {
         self.reader = Some(match File::open(&path) {
             Ok(file) => {
                 let mut buf = BufferedReader::new(file);
-                BtrfsHeader::parse(&mut buf);
+                match BtrfsHeader::parse(&mut buf) {
+                    Ok(header) => assert_eq!(header.version, 1),
+                    Err(err) => fail!("err: {}", err)
+                };
                 buf
             }
             Err(err) => return Some(Err(ReadError(err)))
@@ -180,31 +182,30 @@ impl Iterator<BtrfsParseResult<BtrfsCommand>> for BtrfsCommandConcatIter {
 
 fn write_out(mut iter: BtrfsCommandConcatIter) -> BtrfsParseResult<()> {
     let mut stdout_w = stdout();
-    stdout_w.write(BtrfsHeader { version: 1 }.serialize().as_slice());
+    assert!(stdout_w.write(BtrfsHeader { version: 1 }.serialize()[]).is_ok());
     for command in iter {
         let command = try!(command);
-        stdout_w.write(command.serialize().as_slice());
-        // println!("{:?}", command);
+        assert!(stdout_w.write(command.serialize()[]).is_ok());
     }
     Ok(())
 }
 
 #[cfg(not(test))]
 fn main() {
-    let filenames = match args_as_bytes().as_slice() {
+    let filenames = match args_as_bytes()[] {
         [] => fail!("impossible"),
         [_] => {
             println!("print_usage");
             return;
         },
         [_, ref filename] => vec![filename.clone()],
-        [_, rest..] => Vec::from_slice(rest)
+        [_, rest..] => rest.to_vec()
     };
 
     let paths: Vec<Path> = filenames.into_iter()
         .map(|x| Path::new(x)).collect();
-    
-    let mut iter = match BtrfsCommandConcatIter::new(paths) {
+
+    let iter = match BtrfsCommandConcatIter::new(paths) {
         Ok(iter) => iter,
         Err(err) => fail!("err: {}", err)
     };

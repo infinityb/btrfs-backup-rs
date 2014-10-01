@@ -24,10 +24,9 @@ mod crc32;
 fn print_usage(program: &[u8]) {
     let mut stderr = std::io::stderr();
     let mut out: Vec<u8> = Vec::new();
-    out = out.append(b"USAGE: ")
-        .append(program)
-        .append(b" repository-directory\n");
-
+    out.extend(b"USAGE: ".iter().map(|x| x.clone()));
+    out.extend(program.iter().map(|x| x.clone()));
+    out.extend(b" repository-directory\n".iter().map(|x| x.clone()));
     assert!(stderr.write(out.as_slice()).is_ok());
 }
 

@@ -8,6 +8,9 @@ from uuid import UUID
 from collections import namedtuple
 from operator import attrgetter
 
+import json
+
+
 """Ideally this whole thing is written in native rust,
 including the part where the application calls ioctls to
 get the serialised btrfs stream out"""
@@ -93,7 +96,8 @@ class ProtocolClient(object):
         (len_,) = struct.unpack(
             '>I',
             self.reader.read(struct.calcsize('>I')))
-        print("graph_response: {!r}".format(self.reader.read(len_)))
+        return Graph.inflate_from_json(
+            json.loads(self.reader.read(len_)))
 
     def upload_archive(self):
         self.writer.write(struct.pack('>Q', 3))
@@ -119,6 +123,46 @@ def upload_bogus_archives(client):
         b"\xf8\xc6\x10V\xee\x1e\xb1$;\xe3\x80[\xf9\xa9\xdf\x98\xf9/v6\xb0"
         b"\\/r\xcc\x11\xa6\xfc\xd0'\x1e\xce\xf8\xc6\x10V\xee\x1e\xb1$;\xe3"
         b"\x80[\xf9\xa9\xdf\x98\xf9/v6\xb0\\")
+
+
+class Graph(object):
+    class Edge(object):
+        class List(list):
+            @classmethod
+            def inflate_from_json(cls, doc):
+                return cls(map(Graph.Edge.inflate_from_json, doc))
+
+            def __repr__(self):
+                return "Graph.Edge.List({})".format(
+                    super(Graph.Edge.List, self).__repr__())
+
+        @classmethod
+        def inflate_from_json(cls, doc):
+            inst = cls()
+            inst.size = doc['size']
+            if 'from_node' in doc and doc['from_node'] is not None:
+                inst.from_node = UUID(hex=doc['from_node'])
+            if 'to_node' in doc and doc['to_node'] is not None:
+                inst.to_node = UUID(hex=doc['to_node'])
+            return inst
+
+        def __init__(self):
+            self.size = 0
+            self.from_node = None
+            self.to_node = None
+
+        def __repr__(self):
+            return "Graph.Edge({!r}, {!r}, {!r})".format(
+                self.size, self.from_node, self.to_node)
+
+    @classmethod
+    def inflate_from_json(cls, doc):
+        inst = cls()
+        inst.edges = Graph.Edge.List.inflate_from_json(doc['edges'])
+        return inst
+
+    def __repr__(self):
+        return "Graph(edges={!r})".format(self.edges)
 
 
 def main(argv):
@@ -148,8 +192,8 @@ def main(argv):
     good_parent = recs.find_latest(remote_candidates)
     print("Found a good parent: {!r}".format(good_parent))
 
-    client.get_graph()
-    __import__('sys').exit()
+    graph = client.get_graph()
+    print("got a graph: {!r}".format(graph))
     archive = client.upload_archive()
     snapshot_name = '{}_{}' \
         .format(subv_name, datetime.datetime.now()) \

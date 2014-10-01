@@ -2,18 +2,27 @@ use std::io::{File, BufReader, IoResult, IoError, OtherIoError, stderr};
 use std::io::fs::{rename, unlink};
 use std::collections::HashSet;
 
+use serialize::json;
+use serialize::json::DecoderError;
+
 use uuid::Uuid;
-use msgpack;
-use reliable_rw::{copy_out, ProtocolError, IntegrityError, ReadError, WriteError};
+// use msgpack;
+use reliable_rw::{copy_out, IntegrityError};
+use reliable_rw::ProtocolError as RelRwProtocolError;
+use reliable_rw::ReadError as RelRwReadError;
+use reliable_rw::WriteError as RelRwWriteError;
 
 use repository::{Repository, FullBackup, IncrementalBackup};
+
 
 static MAGIC_REQUEST: &'static [u8] = b"\xa8\x5b\x4b\x2b\x1b\x75\x4c\x0a";
 static MAGIC_RESPONSE: &'static [u8] = b"\xfb\x70\x4c\x63\x41\x1d\x9c\x0a";
 
-pub struct ProtocolServer<'a> {
-    reader: &'a mut Reader+'a,
-    writer: &'a mut Writer+'a
+
+pub enum ProtocolError {
+    ReadError(IoError),
+    ObjectDecode(DecoderError),
+    Other(String)
 }
 
 #[deriving(Encodable, Decodable)]
@@ -55,6 +64,12 @@ pub enum ProtocolCommand {
 }
 
 
+pub struct ProtocolServer<'a> {
+    reader: &'a mut Reader+'a,
+    writer: &'a mut Writer+'a
+}
+
+
 impl<'a> ProtocolServer<'a> {
     pub fn new<'a>(reader: &'a mut Reader, writer: &'a mut Writer) -> ProtocolServer<'a> {
         ProtocolServer {
@@ -86,6 +101,7 @@ impl<'a> ProtocolServer<'a> {
         Ok(out)
     }
 
+    #[deprecated]
     fn dispatch_find_nodes(&mut self, repo: &Repository) -> IoResult<()> {
         let want_parents: HashSet<Uuid> = try!(self.read_parent_list())
                 .into_iter()
@@ -104,6 +120,7 @@ impl<'a> ProtocolServer<'a> {
         Ok(())
     }
 
+    #[deprecated]
     fn dispatch_list_nodes(&mut self, repo: &Repository) -> IoResult<()> {
         let mut err = stderr();
 
@@ -149,13 +166,13 @@ impl<'a> ProtocolServer<'a> {
                 desc: "IntegrityError during read",
                 detail: None
             }),
-            Err(ProtocolError) => Err(IoError {
+            Err(RelRwProtocolError) => Err(IoError {
                 kind: OtherIoError,
                 desc: "ProtocolError during read",
                 detail: None
             }),
-            Err(ReadError(io_error)) => Err(io_error),
-            Err(WriteError(io_error)) => Err(io_error),
+            Err(RelRwReadError(io_error)) => Err(io_error),
+            Err(RelRwWriteError(io_error)) => Err(io_error),
         };
         match result {
             Ok(_) => {
@@ -185,34 +202,37 @@ impl<'a> ProtocolServer<'a> {
     fn dispatch_get_graph(&mut self, repo: &Repository) -> IoResult<()> {
         let mut graph = Graph::new();
         graph.edges.reserve(repo.nodes.len());
-
         for node in repo.nodes.iter() {
             graph.edges.push(match node.kind {
                 FullBackup(ref subv) => {
                     Edge {
-                        size: 0,
+                        size: node.size,
                         from_node: None,
                         to_node: subv.uuid.clone()
                     }
                 },
                 IncrementalBackup(ref snap) => {
                     Edge {
-                        size: 0,
+                        size: node.size,
                         from_node: Some(snap.clone_uuid.clone()),
                         to_node: snap.uuid
                     }
                 }
             });
         }
-
-        let encoded = match msgpack::Encoder::to_msgpack(&graph) {
-            Ok(encoded) => encoded,
-            Err(err) => fail!("encoding graph failed: {}", err)
-        };
-
-        try!(self.writer.write_le_u32(encoded.len() as u32));
-        try!(self.writer.write(encoded.as_slice()));
-
+        let encoded = json::encode(&graph);
+        let encoded_bytes = encoded.as_bytes();
+        // let encoded = match msgpack::Encoder::to_msgpack(&graph) {
+        //     Ok(encoded) => encoded,
+        //     Err(err) => fail!("encoding graph failed: {}", err)
+        // };
+        let mut stderr_writer = stderr();
+        stderr_writer.write_str(
+            format!("SERVER: graph_response_len: {}\n",
+            encoded.len()).as_slice());
+        try!(self.writer.write_be_u32(encoded_bytes.len() as u32));
+        try!(self.writer.write(encoded_bytes));
+        try!(self.writer.flush())
         Ok(())
     }
 
@@ -241,6 +261,7 @@ impl<'a> ProtocolServer<'a> {
                 try!(self.reader.read_be_u64()));
             try!(stderr_writer.write(format!("handling {}\n", op_code).as_bytes()));
             try!(stderr_writer.flush());
+
             match op_code {
                 Some(Quit) => break,
                 Some(val) => try!(self.dispatch(repo, val)),
@@ -252,5 +273,40 @@ impl<'a> ProtocolServer<'a> {
             }
         }
         Ok(())
+    }
+}
+
+
+pub struct ProtocolClient<'a> {
+    reader: &'a mut Reader+'a,
+    writer: &'a mut Writer+'a
+}
+
+
+impl<'a> ProtocolClient<'a> {
+    pub fn new<'a>(reader: &'a mut Reader, writer: &'a mut Writer) -> ProtocolClient<'a> {
+        ProtocolClient {
+            reader: reader,
+            writer: writer
+        }
+    }
+
+    pub fn get_graph(&mut self) -> Result<Graph, ProtocolError> {
+        let len = match self.reader.read_be_u32() {
+            Ok(len) => len as uint,
+            Err(err) => return Err(ReadError(err))
+        };
+        let bytes = match self.reader.read_exact(len) {
+            Ok(bytes) => bytes,
+            Err(err) => return Err(ReadError(err))
+        };
+        let string = match String::from_utf8(bytes) {
+            Ok(string) => string,
+            Err(err) => return Err(Other(format!("bad encoding: {}", err)))
+        };
+        match json::decode(string.as_slice()) {
+            Ok(graph) => Ok(graph),
+            Err(err) => Err(ObjectDecode(err))
+        }
     }
 }

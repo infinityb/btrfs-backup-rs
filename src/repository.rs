@@ -22,6 +22,7 @@ pub enum BackupNodeKind {
 
 
 pub struct BackupNode {
+    pub size: u64,
     pub kind: BackupNodeKind,
     pub uuid: Uuid,
     pub parent_uuid: Option<Uuid>,
@@ -31,7 +32,7 @@ pub struct BackupNode {
 
 
 impl BackupNode {
-    fn from_btrfs_command(path: &Path, command: &BtrfsCommand) -> BackupNode {
+    fn from_btrfs_command(path: &Path, size: u64, command: &BtrfsCommand) -> BackupNode {
         let mut reader = BufReader::new(command.data.as_slice());
         match command.kind {
             BTRFS_SEND_C_SUBVOL => {
@@ -40,6 +41,7 @@ impl BackupNode {
                     Err(err) => fail!("err: {}", err)
                 };
                 BackupNode {
+                    size: size,
                     kind: FullBackup(subvol.clone()),
                     uuid: subvol.uuid.clone(),
                     parent_uuid: None,
@@ -53,6 +55,7 @@ impl BackupNode {
                     Err(err) => fail!("err: {}", err)
                 };
                 BackupNode {
+                    size: size,
                     kind: IncrementalBackup(snap.clone()),
                     uuid: snap.uuid.clone(),
                     parent_uuid: Some(snap.clone_uuid.clone()),
@@ -115,13 +118,15 @@ impl Repository {
         let paths = try!(readdir(&self.root));
         for path in paths.iter() {
             match File::open(path) {
-                Ok(file) => {
+                Ok(mut file) => {
+                    let size = try!(file.stat()).size;
                     let mut file = BufferedReader::new(file);
                     let command = match get_first_command(&mut file) {
                         Ok(command) => command,
                         Err(_) => continue  // TODO: skip, I guess~  Maybe warn?
                     };
-                    let node = BackupNode::from_btrfs_command(path, &command);
+                    let node = BackupNode::from_btrfs_command(
+                        path, size, &command);
                     self.nodes.push(node);
                 },
                 Err(_) => {

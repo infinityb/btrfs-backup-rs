@@ -122,7 +122,7 @@ impl BtrfsCommand {
         let mut buf: Vec<u8> = Vec::from_fn(cap, |_| 0);
         self_w_crc.crc32 = self_w_crc.calculate_crc32();
         {
-            let mut writer = BufWriter::new(buf.as_mut_slice());
+            let mut writer = BufWriter::new(buf[mut]);
             assert!(writer.write_le_u32(self_w_crc.len).is_ok());
             assert!(writer.write_le_u16(self_w_crc.kind as u16).is_ok());
             assert!(writer.write_le_u32(self_w_crc.crc32).is_ok());
@@ -151,8 +151,8 @@ impl BtrfsCommand {
             assert!(writer.write_le_u16(self.kind as u16).is_ok());
             assert!(writer.write_le_u32(0_u32).is_ok());
         }
-        buf = buf.append(header_buf);
-        buf = buf.append(self.data.as_slice());
+        buf.extend(header_buf.iter().map(|x| x.clone()));
+        buf.extend(self.data.iter().map(|x| x.clone()));
 
         crc32c(0, buf.as_slice())
     }
@@ -187,10 +187,11 @@ impl BtrfsHeader {
 
     pub fn serialize(&self) -> Vec<u8> {
         let mut buf = [0u8, ..4];
-        BufWriter::new(buf).write_le_u32(self.version);
-        Vec::new()
-            .append(BTRFS_HEADER_MAGIC)
-            .append(buf)
+        assert!(BufWriter::new(buf).write_le_u32(self.version).is_ok());
+        let mut out = Vec::new();
+        out.extend(BTRFS_HEADER_MAGIC.iter().map(|x| x.clone()));
+        out.extend(buf.iter().map(|x| x.clone()));
+        out
     }
 }
 
@@ -256,7 +257,7 @@ impl BtrfsSubvol {
         let cap = 4 * 3 + self.name.len() + 16 + 8;
         let mut data: Vec<u8> = Vec::from_fn(cap as uint, |_| 0);
         {
-            let mut writer = BufWriter::new(data.as_mut_slice());
+            let mut writer = BufWriter::new(data[mut]);
             assert!(tlv_push(&mut writer, 15, self.name.as_slice()).is_ok());
             assert!(tlv_push(&mut writer, 1, self.uuid.as_bytes()).is_ok());
             assert!(writer.write_le_u16(2).is_ok());
@@ -360,7 +361,7 @@ impl BtrfsSnapshot {
         let cap = 4 * 5 + self.name.len() + 2 * 16 + 8 + 8;
         let mut data: Vec<u8> = Vec::from_fn(cap as uint, |_| 0);
         {
-            let mut writer = BufWriter::new(data.as_mut_slice());
+            let mut writer = BufWriter::new(data[mut]);
             assert!(tlv_push(&mut writer, 15, self.name.as_slice()).is_ok());
             assert!(tlv_push(&mut writer, 1, self.uuid.as_bytes()).is_ok());
             assert!(writer.write_le_u16(2).is_ok());
