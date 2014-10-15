@@ -1,5 +1,7 @@
 #![feature(macro_rules)]
 #![allow(dead_code)]
+#![feature(slicing_syntax)]
+
 extern crate uuid;
 extern crate debug;
 
@@ -13,6 +15,7 @@ use uuid::Uuid;
 use btrfs::{
     BtrfsHeader,
     BtrfsCommand,
+    BtrfsCommandBuf,
     BtrfsSubvol,
     BtrfsSnapshot,
     BtrfsParseResult,
@@ -51,7 +54,8 @@ impl BtrfsCommandConcatIter {
             try!(File::open(&paths.pop().unwrap())));
 
         assert_eq!(BtrfsHeader::parse(&mut last_reader).unwrap().version, 1);
-        let last_snap_cmd = match BtrfsCommand::parse(&mut last_reader) {
+
+        let last_snap_cmd = match try!(BtrfsCommandBuf::read(&mut last_reader)).parse() {
             Ok(command) => match BtrfsSnapshot::load(command.data[]) {
                 Ok(snapshot) => Some(snapshot),
                 Err(err) => fail!("error reading last snapshot: {}", err)
@@ -130,7 +134,11 @@ impl BtrfsCommandConcatIter {
 
     fn current_command<'a>(&'a mut self) -> Option<BtrfsParseResult<BtrfsCommand>> {
         if self.reader.is_some() {
-            match BtrfsCommand::parse(self.reader.as_mut().unwrap()) {
+            let buf = match BtrfsCommandBuf::read(self.reader.as_mut().unwrap()) {
+                Ok(buf) => buf,
+                Err(err) => return Some(Err(ReadError(err)))
+            };
+            match buf.parse() {
                 Ok(command) => {
                     some_try!(self.validation_hook(&command));
                     return Some(Ok(self.transform(command)));

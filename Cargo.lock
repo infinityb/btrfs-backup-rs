@@ -2,23 +2,23 @@
 name = "backupserver"
 version = "0.0.1"
 dependencies = [
- "msgpack 0.0.1 (git+git://github.com/mneumann/rust-msgpack.git#5fa9a45566163626363e04a342cea74c531a4e5b)",
- "reliable-rw 0.1.0 (git+https://github.com/infinityb/reliable-rw-rust#ed30a36162222c9c6741ee6bdfe0c489d836ce1b)",
- "uuid 0.0.1 (git+https://github.com/rust-lang/uuid#83939c6b13803f0aeed7efb79dba087d03d96627)",
+ "msgpack 0.0.1 (git+git://github.com/mneumann/rust-msgpack.git#9f637cb8c6d8201331154730df4a3ca0e1316a9f)",
+ "reliable-rw 0.1.0 (git+https://github.com/infinityb/reliable-rw-rust#e6a646fd94acbfebfd12577f026dfd15d56a690e)",
+ "uuid 0.0.1 (git+https://github.com/rust-lang/uuid#c6159089a491ff4398c6d423263a085c95092a04)",
 ]
 
 [[package]]
 name = "msgpack"
 version = "0.0.1"
-source = "git+git://github.com/mneumann/rust-msgpack.git#5fa9a45566163626363e04a342cea74c531a4e5b"
+source = "git+git://github.com/mneumann/rust-msgpack.git#9f637cb8c6d8201331154730df4a3ca0e1316a9f"
 
 [[package]]
 name = "reliable-rw"
 version = "0.1.0"
-source = "git+https://github.com/infinityb/reliable-rw-rust#ed30a36162222c9c6741ee6bdfe0c489d836ce1b"
+source = "git+https://github.com/infinityb/reliable-rw-rust#e6a646fd94acbfebfd12577f026dfd15d56a690e"
 
 [[package]]
 name = "uuid"
 version = "0.0.1"
-source = "git+https://github.com/rust-lang/uuid#83939c6b13803f0aeed7efb79dba087d03d96627"
+source = "git+https://github.com/rust-lang/uuid#c6159089a491ff4398c6d423263a085c95092a04"
 

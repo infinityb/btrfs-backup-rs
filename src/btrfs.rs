@@ -1,3 +1,5 @@
+#![feature(slicing_syntax)]
+
 use uuid::Uuid;
 use std::io::{BufReader, BufWriter, IoResult, IoError, EndOfFile};
 use crc32::crc32c;
@@ -69,6 +71,67 @@ pub enum BtrfsCommandType {
     BTRFS_SEND_C_UPDATE_EXTENT
 }
 
+pub struct BtrfsCommandBuf(pub Vec<u8>);
+
+
+impl BtrfsCommandBuf {
+    pub fn get_kind(&self) -> Option<BtrfsCommandType> {
+        let BtrfsCommandBuf(ref buf) = *self;
+        FromPrimitive::from_u16(BufReader::new(buf[4..6]).read_le_u16().unwrap())
+    }
+
+    pub fn get_crc32(&self) -> u32 {
+        let BtrfsCommandBuf(ref buf) = *self;
+        let mut reader = BufReader::new(buf[6..10]);
+        reader.read_le_u32().unwrap()
+    }
+
+    pub fn validate_crc32(&self) -> bool {
+        self.calculate_crc32() == self.get_crc32()
+    }
+
+    pub fn calculate_crc32(&self) -> u32 {
+        let BtrfsCommandBuf(ref buf) = *self;
+        let crc32_state = crc32c(0, buf[0..6]);
+        let crc32_state = crc32c(crc32_state, b"\x00\x00\x00\x00");
+        crc32c(crc32_state, buf[10..])
+    }
+
+    pub fn read(reader: &mut Reader) -> IoResult<BtrfsCommandBuf> {
+        let len = try!(reader.read_le_u32());
+        let want_bytes = (2 + 4 + len) as uint;
+        let mut buf = Vec::from_fn(4 + want_bytes, |_| 0);
+        {
+            let mut writer = BufWriter::new(buf[mut]);
+            assert!(writer.write_le_u32(len).is_ok());
+        }
+        // Reading exactly into a buffer
+        assert_eq!(want_bytes, try!(reader.read_at_least(want_bytes, buf[mut 4..])));
+        Ok(BtrfsCommandBuf(buf))
+    }
+
+    pub fn parse(&self) -> Result<BtrfsCommand, BtrfsParseError> {
+        let BtrfsCommandBuf(ref buf) = *self;
+        BtrfsCommand::parse(&mut BufReader::new(buf[]))
+    }
+}
+
+#[test]
+fn test_btrfs_cmd_buf() {
+    let mut reader = BufReader::new(BTRFS_SAMPLE_SUBVOL);
+    let header = match BtrfsHeader::parse(&mut reader) {
+        Ok(header) => header,
+        Err(err) => fail!("err: {}", err)
+    };
+    assert_eq!(header.version, 1);
+    let command_buf = match BtrfsCommandBuf::read(&mut reader) {
+        Ok(command_buf) => command_buf,
+        Err(err) => fail!("err: {}", err)
+    };
+    assert_eq!(command_buf.get_crc32(), command_buf.calculate_crc32());
+    assert_eq!(command_buf.get_kind(), Some(BTRFS_SEND_C_SUBVOL));
+}
+
 
 #[deriving(Clone)]
 pub struct BtrfsCommand {
@@ -77,7 +140,6 @@ pub struct BtrfsCommand {
     pub crc32: u32,
     pub data: Vec<u8>
 }
-
 
 impl BtrfsCommand {
     pub fn from_kind(kind: BtrfsCommandType, data: Vec<u8>) -> BtrfsCommand {
@@ -91,7 +153,7 @@ impl BtrfsCommand {
         out
     }
 
-    pub fn parse(reader: &mut Reader) -> Result<BtrfsCommand, BtrfsParseError> {
+    fn parse(reader: &mut Reader) -> Result<BtrfsCommand, BtrfsParseError> {
         let len = match reader.read_le_u32() {
             Ok(length) => length,
             Err(err) => return Err(ReadError(err))

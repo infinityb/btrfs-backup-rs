@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#![feature(slicing_syntax)]
+
 extern crate uuid;
 extern crate debug;
 
