@@ -75,6 +75,11 @@ pub struct BtrfsCommandBuf(pub Vec<u8>);
 
 
 impl BtrfsCommandBuf {
+    pub fn get_data<'a>(&'a self) -> &'a [u8] {
+        let BtrfsCommandBuf(ref buf) = *self;
+        buf[10..]
+    }
+
     pub fn get_kind(&self) -> Option<BtrfsCommandType> {
         let BtrfsCommandBuf(ref buf) = *self;
         FromPrimitive::from_u16(BufReader::new(buf[4..6]).read_le_u16().unwrap())

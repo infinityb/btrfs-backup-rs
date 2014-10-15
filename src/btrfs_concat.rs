@@ -6,7 +6,7 @@ extern crate uuid;
 extern crate debug;
 
 use std::path::Path;
-use std::io::{BufferedReader, File, IoResult, stdout};
+use std::io::{BufReader, BufferedReader, File, IoResult, stdout};
 use std::os::args_as_bytes;
 use std::collections::{RingBuf, Deque};
 
@@ -87,18 +87,18 @@ impl BtrfsCommandConcatIter {
     }
 
     #[inline]
-    fn validation_hook(&mut self, command: &BtrfsCommand) -> BtrfsParseResult<()> {
-        if command.kind == BTRFS_SEND_C_SUBVOL {
+    fn validation_hook(&mut self, command: &BtrfsCommandBuf) -> BtrfsParseResult<()> {
+        if command.get_kind() == Some(BTRFS_SEND_C_SUBVOL) {
             assert!(self.curr_uuid.is_none());
-            match BtrfsSubvol::load(command.data[]) {
+            match BtrfsSubvol::load(command.get_data()) {
                 Ok(subvol) => {
                     self.curr_uuid = Some(subvol.uuid);
                 },
                 Err(err) => fail!("err: {}", err)
             }
         }
-        if command.kind == BTRFS_SEND_C_SNAPSHOT {
-            match BtrfsSnapshot::load(command.data[]) {
+        if command.get_kind() == Some(BTRFS_SEND_C_SNAPSHOT) {
+            match BtrfsSnapshot::load(command.get_data()) {
                 Ok(snap) => {
                     assert_eq!(self.curr_uuid, Some(snap.clone_uuid));
                     self.curr_uuid = Some(snap.uuid);
@@ -122,11 +122,12 @@ impl BtrfsCommandConcatIter {
     }
 
     #[inline]
-    fn transform(&mut self, command: BtrfsCommand) -> BtrfsCommand {
-        if self.last_snap_cmd.is_some() && command.kind == BTRFS_SEND_C_SUBVOL {
-            let mut subv = BtrfsSubvol::load(command.data[]).unwrap();
+    fn transform(&mut self, command: BtrfsCommandBuf) -> BtrfsCommandBuf {
+        if self.last_snap_cmd.is_some() && command.get_kind() == Some(BTRFS_SEND_C_SUBVOL) {
+            let mut subv = BtrfsSubvol::load(command.get_data()).unwrap();
             subv.name = self.last_snap_cmd.take().unwrap().name;
-            subv.encap()
+            let encapped = subv.encap().serialize();
+            BtrfsCommandBuf::read(&mut BufReader::new(encapped[])).unwrap()
         } else {
             command
         }
@@ -140,8 +141,8 @@ impl BtrfsCommandConcatIter {
             };
             match buf.parse() {
                 Ok(command) => {
-                    some_try!(self.validation_hook(&command));
-                    return Some(Ok(self.transform(command)));
+                    some_try!(self.validation_hook(&buf));
+                    return Some(Ok(self.transform(buf).parse().unwrap()));
                 }
                 Err(ref err) if BtrfsParseError::is_eof(err) => {
                     self.reader = None;
