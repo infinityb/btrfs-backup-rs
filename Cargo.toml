@@ -28,6 +28,10 @@ path = "src/btrfs_command.rs"
 git = "https://github.com/infinityb/reliable-rw-rust"
 
 
+[dependencies.argparse]
+git = "https://github.com/infinityb/rust-argparse"
+
+
 [dependencies.uuid]
 git = "https://github.com/rust-lang/uuid"
 

@@ -2,10 +2,16 @@
 name = "backupserver"
 version = "0.0.1"
 dependencies = [
+ "argparse 0.1.0 (git+https://github.com/infinityb/rust-argparse#ce82950f3a8213c3f25841e7e420e5b3e48131b9)",
  "msgpack 0.0.1 (git+git://github.com/mneumann/rust-msgpack.git#9f637cb8c6d8201331154730df4a3ca0e1316a9f)",
  "reliable-rw 0.1.0 (git+https://github.com/infinityb/reliable-rw-rust#e6a646fd94acbfebfd12577f026dfd15d56a690e)",
  "uuid 0.0.1 (git+https://github.com/rust-lang/uuid#c6159089a491ff4398c6d423263a085c95092a04)",
 ]
+
+[[package]]
+name = "argparse"
+version = "0.1.0"
+source = "git+https://github.com/infinityb/rust-argparse#ce82950f3a8213c3f25841e7e420e5b3e48131b9"
 
 [[package]]
 name = "msgpack"
