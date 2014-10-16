@@ -227,9 +227,9 @@ impl<'a> ProtocolServer<'a> {
         //     Err(err) => fail!("encoding graph failed: {}", err)
         // };
         let mut stderr_writer = stderr();
-        stderr_writer.write_str(
+        assert!(stderr_writer.write_str(
             format!("SERVER: graph_response_len: {}\n",
-            encoded.len()).as_slice());
+            encoded.len()).as_slice()).is_ok());
         try!(self.writer.write_be_u32(encoded_bytes.len() as u32));
         try!(self.writer.write(encoded_bytes));
         try!(self.writer.flush())

@@ -1,5 +1,3 @@
-#![feature(slicing_syntax)]
-
 use uuid::Uuid;
 use std::io::{BufReader, BufWriter, IoResult, IoError, EndOfFile};
 use crc32::crc32c;
@@ -75,6 +73,11 @@ pub struct BtrfsCommandBuf(pub Vec<u8>);
 
 
 impl BtrfsCommandBuf {
+    pub fn as_slice<'a>(&'a self) -> &'a [u8] {
+        let BtrfsCommandBuf(ref buf) = *self;
+        buf[]
+    }
+
     pub fn get_data<'a>(&'a self) -> &'a [u8] {
         let BtrfsCommandBuf(ref buf) = *self;
         buf[10..]

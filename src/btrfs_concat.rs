@@ -6,7 +6,7 @@ extern crate uuid;
 extern crate debug;
 
 use std::path::Path;
-use std::io::{BufReader, BufferedReader, File, IoResult, stdout};
+use std::io::{BufReader, BufferedReader, BufferedWriter, File, IoResult, stdout};
 use std::os::args_as_bytes;
 use std::collections::{RingBuf, Deque};
 
@@ -14,7 +14,6 @@ use uuid::Uuid;
 
 use btrfs::{
     BtrfsHeader,
-    BtrfsCommand,
     BtrfsCommandBuf,
     BtrfsSubvol,
     BtrfsSnapshot,
@@ -36,6 +35,7 @@ macro_rules! some_try(
 
 struct BtrfsCommandConcatIter {
     paths: RingBuf<Path>,
+    current_path: Option<Path>,
     reader: Option<BufferedReader<File>>,
     last_snap_cmd: Option<BtrfsSnapshot>,
     last_reader: Option<BufferedReader<File>>,
@@ -55,8 +55,8 @@ impl BtrfsCommandConcatIter {
 
         assert_eq!(BtrfsHeader::parse(&mut last_reader).unwrap().version, 1);
 
-        let last_snap_cmd = match try!(BtrfsCommandBuf::read(&mut last_reader)).parse() {
-            Ok(command) => match BtrfsSnapshot::load(command.data[]) {
+        let last_snap_cmd = match BtrfsCommandBuf::read(&mut last_reader) {
+            Ok(command) => match BtrfsSnapshot::load(command.get_data()) {
                 Ok(snapshot) => Some(snapshot),
                 Err(err) => fail!("error reading last snapshot: {}", err)
             },
@@ -74,6 +74,7 @@ impl BtrfsCommandConcatIter {
 
         Ok(BtrfsCommandConcatIter {
             paths: paths,
+            current_path: None,
             reader: first_reader,
             last_snap_cmd: last_snap_cmd,
             last_reader: Some(last_reader),
@@ -110,13 +111,13 @@ impl BtrfsCommandConcatIter {
     }
 
     #[inline]
-    fn suppress_command(&self, command: &BtrfsCommand) -> bool {
+    fn suppress_command(&self, command: &BtrfsCommandBuf) -> bool {
         (
             (
-                command.kind == BTRFS_SEND_C_END &&
+                command.get_kind() == Some(BTRFS_SEND_C_END) &&
                 self.last_reader.is_some()
             ) || (
-                command.kind == BTRFS_SEND_C_SNAPSHOT
+                command.get_kind() == Some(BTRFS_SEND_C_SNAPSHOT)
             )
         )
     }
@@ -133,16 +134,17 @@ impl BtrfsCommandConcatIter {
         }
     }
 
-    fn current_command<'a>(&'a mut self) -> Option<BtrfsParseResult<BtrfsCommand>> {
+    fn current_command<'a>(&'a mut self) -> Option<BtrfsParseResult<BtrfsCommandBuf>> {
         if self.reader.is_some() {
             let buf = match BtrfsCommandBuf::read(self.reader.as_mut().unwrap()) {
                 Ok(buf) => buf,
                 Err(err) => return Some(Err(ReadError(err)))
             };
+            some_try!(self.validation_hook(&buf));
             match buf.parse() {
                 Ok(command) => {
-                    some_try!(self.validation_hook(&buf));
-                    return Some(Ok(self.transform(buf).parse().unwrap()));
+                    
+                    return Some(Ok(self.transform(buf)));
                 }
                 Err(ref err) if BtrfsParseError::is_eof(err) => {
                     self.reader = None;
@@ -169,12 +171,13 @@ impl BtrfsCommandConcatIter {
             }
             Err(err) => return Some(Err(ReadError(err)))
         });
+        self.current_path = Some(path);
         self.current_command()
     }
 }
 
-impl Iterator<BtrfsParseResult<BtrfsCommand>> for BtrfsCommandConcatIter {
-    fn next(&mut self) -> Option<BtrfsParseResult<BtrfsCommand>> {
+impl Iterator<BtrfsParseResult<BtrfsCommandBuf>> for BtrfsCommandConcatIter {
+    fn next(&mut self) -> Option<BtrfsParseResult<BtrfsCommandBuf>> {
         loop {
             match self.current_command() {
                 Some(Ok(command)) => {
@@ -182,7 +185,13 @@ impl Iterator<BtrfsParseResult<BtrfsCommand>> for BtrfsCommandConcatIter {
                         return Some(Ok(command))
                     }
                 },
-                Some(Err(err)) => return Some(Err(err)),
+                Some(Err(err)) => {
+                    match self.current_path {
+                        Some(ref path) => fail!("err: {} during read of {}", err, path.display()),
+                        None => ()
+                    }
+                    return Some(Err(err));
+                }
                 None => return None
             }
         }
@@ -190,11 +199,11 @@ impl Iterator<BtrfsParseResult<BtrfsCommand>> for BtrfsCommandConcatIter {
 }
 
 fn write_out(mut iter: BtrfsCommandConcatIter) -> BtrfsParseResult<()> {
-    let mut stdout_w = stdout();
+    let mut stdout_w = BufferedWriter::new(stdout());
     assert!(stdout_w.write(BtrfsHeader { version: 1 }.serialize()[]).is_ok());
     for command in iter {
         let command = try!(command);
-        assert!(stdout_w.write(command.serialize()[]).is_ok());
+        assert!(stdout_w.write(command.as_slice()).is_ok());
     }
     Ok(())
 }
